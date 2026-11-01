@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=10" />
+<link rel="stylesheet" href="app.css?v=12" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -55,24 +55,25 @@
 
       <div class="wrap">
         <div class="hero-visual">
-          <svg class="annot-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <line x1="17" y1="22" x2="42" y2="44" />
-            <line x1="84" y1="26" x2="66" y2="50" />
-            <line x1="18" y1="78" x2="31" y2="58" />
-          </svg>
+          <!-- Labels are hotspots pinned to 3D points on the glasses (found by ray-casting the
+               model), so they ride along as it turns and hide when their part faces away. -->
           <model-viewer id="hero-glasses" src="models/glasses.glb" alt="Ray-Ban Meta smart glasses"
-            interaction-prompt="none" disable-zoom disable-pan disable-tap
+            camera-controls disable-zoom disable-pan touch-action="pan-y" interaction-prompt="none"
+            auto-rotate auto-rotate-delay="0" rotation-per-second="14deg"
             environment-image="neutral" exposure="1.2" shadow-intensity="0.5" shadow-softness="1"
             camera-orbit="18deg 84deg 100%" field-of-view="28deg">
             <div class="mv-loading" slot="poster"><span class="spin"></span></div>
             <div slot="progress-bar"></div>
+            <button class="hs right" slot="hotspot-cam" data-position="23.0m 2.8m 15.5m" data-normal="0.19m 0m 0.98m" aria-label="Camera">
+              <span class="hs-label"><b>Sees what the hands do</b><i>a camera at eye level on the job</i></span>
+            </button>
+            <button class="hs up" slot="hotspot-mic" data-position="-2.1m 5.8m 20.4m" data-normal="0m 0.3m 0.95m" aria-label="Microphones">
+              <span class="hs-label"><b>Learns from your senior tech</b><i>their words become the job card</i></span>
+            </button>
+            <button class="hs left" slot="hotspot-spk" data-position="-23.9m 4.3m -2.5m" data-normal="-1m 0m 0m" aria-label="Speaker">
+              <span class="hs-label"><b>Talks the operator through it</b><i>one step at a time, hands free</i></span>
+            </button>
           </model-viewer>
-          <span class="pin" style="left:42%;top:44%"></span>
-          <span class="pin" style="left:66%;top:50%"></span>
-          <span class="pin" style="left:31%;top:58%"></span>
-          <div class="annot mic"><b>Learns from your senior tech</b><i>their words become the job card</i></div>
-          <div class="annot cam"><b>Sees what the hands do</b><i>a camera at eye level on the job</i></div>
-          <div class="annot spk"><b>Talks the operator through it</b><i>one step at a time, hands free</i></div>
 
           <div class="verdict-card" aria-label="Example verification result">
             <div class="vc-head"><span class="vc-step">Step 3 of 7</span><span class="vc-live"><span></span>live check</span></div>
@@ -433,6 +434,6 @@
   <div id="report-body" class="list"></div>
 </section>
 
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

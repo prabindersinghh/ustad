@@ -924,6 +924,31 @@ fetch('/api/health')
   links.forEach((a) => { const s = document.getElementById(a.dataset.jump); if (s) io.observe(s); });
 })();
 
+/* Hero hotspots: each label is pinned to a 3D point on the glasses and shown
+ * only while its part faces the viewer. Facing is the dot product of the
+ * part's surface normal with the direction to the camera, recomputed on every
+ * camera move (auto-rotate included). */
+(function initHotspots() {
+  const mv = document.getElementById('hero-glasses');
+  if (!mv) return;
+  const spots = Array.from(mv.querySelectorAll('.hs')).map((el) => {
+    const n = (el.dataset.normal || '0 0 1').split(/\s+/).map(parseFloat);
+    const len = Math.hypot(n[0], n[1], n[2]) || 1;
+    return { el, n: n.map((v) => v / len) };
+  });
+  const update = () => {
+    if (!mv.getCameraOrbit) return;
+    const { theta, phi } = mv.getCameraOrbit();
+    const dir = [Math.sin(phi) * Math.sin(theta), Math.cos(phi), Math.sin(phi) * Math.cos(theta)];
+    spots.forEach(({ el, n }) => {
+      el.classList.toggle('on', n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2] > 0.25);
+    });
+  };
+  mv.addEventListener('camera-change', update);
+  mv.addEventListener('load', update);
+  update();
+})();
+
 /* The loop figure is same-origin: size its frame to the drawing so it never
  * shows a scrollbar, and again whenever the page width changes. */
 (function fitLoopFigure() {
