@@ -113,61 +113,108 @@ const Capture = {
       showCameraError(wrap, err, () => this.open());
       return;
     }
+    this.resetButton();
+    $('cap-status').textContent = 'Describe each step out loud as you do it.';
     $('cap-btn').onclick = () => (this.recording ? this.stop() : this.start());
   },
 
   start() {
+    // One tap, one socket: a second tap while connecting used to open a second
+    // capture socket and split the frames from the stop message.
+    if (this.connecting || this.recording) return;
+    this.connecting = true;
+    this.frames = 0;
+    $('cap-btn').disabled = true;
+    $('cap-btn').textContent = 'Connecting…';
     this.ws = new WebSocket(WS_BASE + '/ws/capture');
     this.chunks = [];
 
     this.ws.onopen = () => {
+      this.connecting = false;
       this.ws.send(JSON.stringify({ type: 'start' }));
       this.recording = true;
+      $('cap-btn').disabled = false;
       $('cap-btn').textContent = 'Stop & build procedure';
       $('cap-btn').classList.add('stop');
-      $('cap-badge').textContent = 'recording';
       $('cap-badge').classList.add('rec');
+      this.setBadge();
 
-      // Sample frames on an interval rather than streaming every frame.
-      this.timer = setInterval(() => {
-        const data = MediaSource_.grab($('cap-video'));
-        if (data && this.ws.readyState === 1) {
-          this.ws.send(JSON.stringify({ type: 'frame', data }));
-        }
-      }, CAPTURE_FRAME_MS);
+      // First frame now, then sample on an interval rather than streaming
+      // every frame. Even a short take always has frames.
+      this.sendFrame();
+      this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
 
-      // Record narration in one go; transcribe it when the expert stops.
-      const mime = MediaRecorder.isTypeSupported('audio/mp4')
-        ? 'audio/mp4' : 'audio/webm';
+      // Record the narration only. Recording the camera stream too made the
+      // upload big enough for the server to drop the socket.
+      const audioOnly = new MediaStream(MediaSource_.stream.getAudioTracks());
+      const mime = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
       try {
-        this.recorder = new MediaRecorder(MediaSource_.stream, { mimeType: mime });
+        this.recorder = new MediaRecorder(audioOnly, { mimeType: mime });
         this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
         this.recorder.start();
         this.mime = mime;
       } catch (err) {
-        $('cap-status').textContent = 'Audio recording unavailable: ' + err.message;
+        $('cap-status').textContent = 'Narration recording unavailable: ' + err.message;
       }
     };
 
     this.ws.onmessage = (evt) => {
       const msg = JSON.parse(evt.data);
+      if (msg.type === 'frame_ack') { this.frames = msg.count; this.setBadge(); }
       if (msg.type === 'status') $('cap-status').textContent = msg.message;
-      if (msg.type === 'error') $('cap-status').textContent = 'Error: ' + msg.message;
+      if (msg.type === 'error') {
+        $('cap-status').textContent = msg.message;
+        this.resetButton();
+      }
       if (msg.type === 'procedure') {
         $('cap-status').textContent =
-          `Built "${msg.procedure.title}". ${msg.procedure.steps.length} steps.`;
-        Voice.say(`Procedure captured. ${msg.procedure.steps.length} steps.`);
-        setTimeout(() => Library.open(), 1200);
+          `Saved "${msg.procedure.title}". ${msg.procedure.steps.length} steps. Opening your procedures…`;
+        $('cap-badge').textContent = 'saved';
+        Voice.say(`Procedure saved. ${msg.procedure.steps.length} steps.`);
+        setTimeout(() => Library.open(msg.procedure_id), 1600);
       }
     };
 
-    this.ws.onerror = () => { $('cap-status').textContent = 'Connection failed.'; };
+    this.ws.onerror = () => {};
+    this.ws.onclose = () => {
+      if (this.connecting || this.recording || this.processing) {
+        $('cap-status').textContent = 'Lost the connection to the server. Check the laptop is running, then try again.';
+        this.connecting = false;
+        this.recording = false;
+        this.processing = false;
+        clearInterval(this.timer);
+        this.resetButton();
+      }
+    };
+  },
+
+  sendFrame() {
+    const data = MediaSource_.grab($('cap-video'));
+    if (data && this.ws && this.ws.readyState === 1) {
+      this.ws.send(JSON.stringify({ type: 'frame', data }));
+    }
+  },
+
+  setBadge() {
+    $('cap-badge').textContent = `recording · ${this.frames || 0} frames`;
+  },
+
+  resetButton() {
+    this.processing = false;
+    $('cap-btn').disabled = false;
+    $('cap-btn').textContent = 'Start recording';
+    $('cap-btn').classList.remove('stop');
+    $('cap-badge').classList.remove('rec');
+    $('cap-badge').textContent = 'ready';
   },
 
   async stop() {
+    if (!this.recording) return;
     this.recording = false;
+    this.processing = true;
     clearInterval(this.timer);
-    $('cap-btn').textContent = 'Processing…';
+    this.sendFrame();   // the end state of the job is the most useful frame
+    $('cap-btn').textContent = 'Building your procedure…';
     $('cap-btn').disabled = true;
     $('cap-badge').textContent = 'processing';
     $('cap-badge').classList.remove('rec');
@@ -182,14 +229,15 @@ const Capture = {
       this.ws.send(JSON.stringify({ type: 'audio', data: b64, mime: this.mime }));
     }
     this.ws.send(JSON.stringify({ type: 'stop' }));
-    setTimeout(() => { $('cap-btn').disabled = false; $('cap-btn').classList.remove('stop'); }, 500);
   },
 
   teardown() {
     clearInterval(this.timer);
     if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
-    if (this.ws) { try { this.ws.close(); } catch (_) {} this.ws = null; }
     this.recording = false;
+    this.connecting = false;
+    this.processing = false;
+    if (this.ws) { const ws = this.ws; this.ws = null; ws.onclose = null; try { ws.close(); } catch (_) {} }
     MediaSource_.stop();
     Voice.stop();
   },
@@ -198,7 +246,8 @@ const Capture = {
 /* ------------------------------------------------------------ library */
 
 const Library = {
-  async open() {
+  async open(highlightId) {
+    Capture.teardown();
     show('library');
     const list = $('library-list');
     list.innerHTML = '<div class="empty">Loading…</div>';
@@ -217,6 +266,13 @@ const Library = {
           `<h3></h3><div class="meta">${p.step_count} steps` +
           `${p.machine ? ' · ' + escapeHtml(p.machine) : ''}</div>`;
         el.querySelector('h3').textContent = p.title;
+        if (p.id === highlightId) {
+          el.classList.add('fresh');
+          const tag = document.createElement('span');
+          tag.className = 'fresh-tag';
+          tag.textContent = 'Just captured';
+          el.prepend(tag);
+        }
         el.onclick = () => Guide.open(p.id);
         list.appendChild(el);
       });

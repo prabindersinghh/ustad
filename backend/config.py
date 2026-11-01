@@ -14,6 +14,9 @@ SPARK_MODEL = os.getenv("SPARK_MODEL", "muse-spark-1.3")
 SPARK_AUDIO_MODEL = os.getenv("SPARK_AUDIO_MODEL", "muse-spark-1.2")
 SAM_MODEL = os.getenv("SAM_MODEL", "sam-3.1")
 ASR_MODEL = os.getenv("ASR_MODEL", "muse-voice-transcribe-1.0")
+# ASR only accepts 16 kHz mono WAV; phones record AAC, so we transcode with
+# ffmpeg. Leave empty to find it on PATH.
+FFMPEG = os.getenv("FFMPEG", "")
 
 # --------------------------------------------------------------------------
 # Open-weights reasoning backend.

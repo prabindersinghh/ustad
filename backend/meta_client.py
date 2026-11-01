@@ -301,52 +301,62 @@ def transcribe(
 ) -> str:
     """Batch transcription via Muse Voice Transcribe.
 
-    Falls back to audio-capable Muse Spark if the ASR endpoint rejects the
-    request, so a wrong field name never blocks the build.
+    Per dev.meta.ai/docs/api-reference/voice/transcribe: multipart/form-data
+    with a `request` JSON part and an `audio` part, and the audio must be
+    mono 16-bit PCM WAV at 16 or 24 kHz. Phones record AAC in an mp4/webm
+    container, so we transcode first. Raises on failure; the caller decides
+    whether a capture can go on without narration.
     """
-    url = f"{config.META_BASE_URL.rstrip('/')}/asr/transcribe"
-    files = {"file": (filename, audio_bytes, "application/octet-stream")}
-    data: dict[str, str] = {"model": config.ASR_MODEL}
+    wav = _to_wav16k(audio_bytes, filename)
+    req: dict[str, Any] = {
+        "model": config.ASR_MODEL,
+        "audioEncoding": "WAV",
+        "mode": "ENDPOINTING",
+    }
     if keywords:
-        data["keywords"] = ",".join(keywords)
+        req["keywords"] = keywords
     if language:
-        data["language"] = language
+        req["languageBias"] = [language]
 
-    try:
-        r = httpx.post(
-            url,
-            headers={"Authorization": f"Bearer {config.MODEL_API_KEY}"},
-            files=files,
-            data=data,
-            timeout=180.0,
-        )
-        r.raise_for_status()
-        payload = r.json()
-        for key in ("text", "transcript", "output_text"):
-            if isinstance(payload.get(key), str):
-                return payload[key].strip()
-        log.warning("ASR returned unexpected shape: %s", list(payload)[:8])
-    except Exception as exc:  # noqa: BLE001 - we intentionally degrade
-        log.warning("ASR endpoint failed (%s); falling back to Spark audio", exc)
-
-    return _transcribe_via_spark(audio_bytes, filename)
-
-
-def _transcribe_via_spark(audio_bytes: bytes, filename: str) -> str:
-    """Fallback: hand the audio to an audio-capable Muse Spark model."""
-    fmt = filename.rsplit(".", 1)[-1].lower() or "m4a"
-    resp = reason(
-        "Transcribe the audio verbatim. Output only the transcript text.",
-        [
-            {
-                "type": "input_audio",
-                "input_audio": {
-                    "data": base64.b64encode(audio_bytes).decode(),
-                    "format": fmt,
-                },
-            }
-        ],
-        model=config.SPARK_AUDIO_MODEL,
-        force_hosted=True,  # open-weights endpoints do not take audio
+    r = httpx.post(
+        f"{config.META_BASE_URL.rstrip('/')}/asr/transcribe",
+        headers={"Authorization": f"Bearer {config.MODEL_API_KEY}", "Accept": "application/json"},
+        files={
+            "request": (None, json.dumps(req), "application/json"),
+            "audio": ("recording.wav", wav, "audio/wav"),
+        },
+        timeout=180.0,
     )
-    return (getattr(resp, "output_text", "") or "").strip()
+    if r.status_code >= 400:
+        raise RuntimeError(f"ASR {r.status_code}: {r.text[:300]}")
+    payload = r.json()
+    log.info("ASR %d ms of audio -> %d turns", payload.get("audioDurationMs", 0), len(payload.get("turns") or []))
+    return (payload.get("transcript") or "").strip()
+
+
+def _to_wav16k(audio_bytes: bytes, filename: str) -> bytes:
+    """Any phone recording -> mono 16-bit PCM WAV at 16 kHz, via ffmpeg.
+
+    Goes through temp files rather than pipes: mp4 from iOS puts its index at
+    the end, which ffmpeg cannot read from a non-seekable stdin.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    ffmpeg = config.FFMPEG or shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("ffmpeg not found: install it or set FFMPEG in .env")
+    ext = (filename.rsplit(".", 1)[-1] or "m4a").lower()
+    with tempfile.TemporaryDirectory() as tmp:
+        src, dst = Path(tmp) / f"in.{ext}", Path(tmp) / "out.wav"
+        src.write_bytes(audio_bytes)
+        proc = subprocess.run(
+            [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
+             "-vn", "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", "-f", "wav", str(dst)],
+            capture_output=True, timeout=120,
+        )
+        if proc.returncode != 0 or not dst.exists():
+            raise RuntimeError(f"ffmpeg could not decode the recording: {proc.stderr.decode(errors='ignore')[:300]}")
+        return dst.read_bytes()

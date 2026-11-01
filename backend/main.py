@@ -9,6 +9,7 @@ phone for Ray-Ban Meta glasses later without touching this file.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -166,21 +167,36 @@ async def ws_capture(ws: WebSocket) -> None:
                 audio_mime = msg.get("mime", audio_mime)
 
             elif kind == "stop":
+                audio_size = sum(len(b) for b in audio_blobs)
+                log.info("capture stop: %d keyframes, %d bytes of %s audio",
+                         len(keyframes), audio_size, audio_mime)
+                if not keyframes:
+                    await ws.send_json({
+                        "type": "error",
+                        "message": "No camera frames reached the server. Keep recording "
+                                   "for a few seconds with the camera on the work, then stop.",
+                    })
+                    continue
+
                 await status(f"Captured {len(keyframes)} keyframes. Transcribing…")
                 transcript = ""
                 if audio_blobs:
                     ext = "m4a" if "mp4" in audio_mime or "m4a" in audio_mime else "webm"
                     try:
-                        transcript = meta_client.transcribe(
-                            b"".join(audio_blobs), filename=f"capture.{ext}"
+                        # Model calls block for seconds; run them off the event
+                        # loop so the socket keeps answering pings and stays up.
+                        transcript = await asyncio.to_thread(
+                            meta_client.transcribe, b"".join(audio_blobs), filename=f"capture.{ext}"
                         )
                     except Exception as exc:  # noqa: BLE001
                         log.exception("Transcription failed")
-                        await status(f"Transcription failed: {exc}")
+                        await status("Couldn't transcribe the narration; writing from the video alone.")
 
                 await status("Writing the procedure…")
                 try:
-                    proc = procedures.build_procedure(transcript, keyframes, hint=hint)
+                    proc = await asyncio.to_thread(
+                        procedures.build_procedure, transcript, keyframes, hint=hint
+                    )
                 except Exception as exc:  # noqa: BLE001
                     log.exception("Procedure generation failed")
                     await ws.send_json({"type": "error", "message": str(exc)})
@@ -301,7 +317,8 @@ async def ws_guide(ws: WebSocket) -> None:
 
                 frame = _decode_frame(msg["data"])
                 try:
-                    action = guide.verify_step(
+                    action = await asyncio.to_thread(
+                        guide.verify_step,
                         session_id=session_id,
                         step=proc["steps"][idx],
                         frame=frame,

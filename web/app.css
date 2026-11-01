@@ -292,6 +292,8 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .card { display: block; width: 100%; text-align: left; font: inherit; cursor: pointer; padding: 18px; margin-bottom: 12px; border-radius: 16px; border: 1px solid var(--line); background: #fff; color: var(--ink); box-shadow: var(--shadow-sm); }
 .card h3 { margin: 0 0 4px; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
 .card .meta { font-size: 13px; color: var(--muted); }
+.card.fresh { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(26,86,224,.14), var(--shadow-sm); }
+.fresh-tag { display: inline-block; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #fff; background: var(--blue); padding: 3px 9px; border-radius: 999px; }
 .empty { padding: 52px 16px; text-align: center; color: var(--muted); }
 .event { border-left: 3px solid var(--line); }
 .event.pass { border-left-color: var(--ok); } .event.fail { border-left-color: var(--bad); } .event.retry { border-left-color: var(--warn); }
