@@ -202,6 +202,78 @@ def list_sessions(limit: int = 50) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+# ------------------------------------------------------------------ insights
+
+DONE_VERDICTS = ("pass", "inferred", "confirmed", "skipped")
+
+
+def step_insights(procedure_id: str) -> dict[str, Any]:
+    """Where operators struggle on one procedure, across all its guided runs.
+
+    Per step: how many runs reached it, how often the first check passed,
+    errors caught, median time spent on it, and the most recent reasons it
+    failed. Time on a step runs from the previous step's completion (or the
+    session start) to this step's completion.
+    """
+    import statistics
+
+    with connect() as conn:
+        sessions = conn.execute(
+            "SELECT id, started_at FROM sessions WHERE procedure_id = ? AND mode = 'guide'",
+            (procedure_id,),
+        ).fetchall()
+        events = conn.execute(
+            "SELECT e.* FROM step_events e JOIN sessions s ON s.id = e.session_id"
+            " WHERE s.procedure_id = ? ORDER BY e.created_at",
+            (procedure_id,),
+        ).fetchall()
+
+    by_session: dict[str, list[dict[str, Any]]] = {}
+    for e in events:
+        by_session.setdefault(e["session_id"], []).append(dict(e))
+    started = {s["id"]: s["started_at"] for s in sessions}
+
+    steps: dict[int, dict[str, Any]] = {}
+
+    def slot(i: int) -> dict[str, Any]:
+        return steps.setdefault(i, {"step": i + 1, "runs": 0, "first_try": 0, "caught": 0,
+                                    "inferred": 0, "skipped": 0, "times": [], "reasons": []})
+
+    for sid, evs in by_session.items():
+        last_done = started.get(sid, evs[0]["created_at"])
+        seen: set[int] = set()
+        for e in evs:
+            st = slot(e["step_index"])
+            if e["step_index"] not in seen:
+                seen.add(e["step_index"])
+                st["runs"] += 1
+                if e["verdict"] in ("pass", "confirmed"):
+                    st["first_try"] += 1
+            if e["verdict"] == "fail":
+                st["caught"] += 1
+                if e["reason"]:
+                    st["reasons"].append(e["reason"])
+            elif e["verdict"] == "inferred":
+                st["inferred"] += 1
+            elif e["verdict"] == "skipped":
+                st["skipped"] += 1
+            if e["verdict"] in DONE_VERDICTS:
+                st["times"].append(e["created_at"] - last_done)
+                last_done = e["created_at"]
+
+    out = []
+    for i in sorted(steps):
+        st = steps.pop(i)
+        times = st.pop("times")
+        st["median_s"] = round(statistics.median(times), 1) if times else None
+        st["first_try_rate"] = round(st["first_try"] / st["runs"], 2) if st["runs"] else None
+        st["reasons"] = list(dict.fromkeys(reversed(st["reasons"])))[:3]
+        out.append(st)
+    hardest = max(out, key=lambda s: (s["caught"], -(s["first_try_rate"] or 1)), default=None)
+    return {"runs": len(by_session), "steps": out,
+            "hardest_step": hardest["step"] if hardest and hardest["caught"] else None}
+
+
 # --------------------------------------------------------------------- usage
 
 def log_usage(model: str, kind: str, units: float, cost: float, note: str | None = None) -> None:

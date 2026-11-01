@@ -106,6 +106,14 @@ def api_metrics() -> dict[str, Any]:
     return db.metrics()
 
 
+@app.get("/api/procedures/{pid}/insights")
+def api_insights(pid: str) -> dict[str, Any]:
+    """Per-step struggle data for a procedure: first-try rate, catches, time."""
+    if not db.get_procedure(pid):
+        raise HTTPException(404, "No such procedure")
+    return db.step_insights(pid)
+
+
 @app.get("/api/usage")
 def api_usage() -> dict[str, Any]:
     """Metered spend at list price, by model, against BUDGET_USD."""

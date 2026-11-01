@@ -122,11 +122,12 @@ const Mic = {
   ctx: null, src: null, node: null, sink: null, onchunk: null,
   CHUNK: 1600,
 
-  async start(stream, onchunk) {
+  async start(stream, onchunk, onlevel) {
     this.stop();
     const track = stream && stream.getAudioTracks()[0];
     if (!track) throw new Error('no microphone track');
     this.onchunk = onchunk;
+    this.onlevel = onlevel || null;
     const AC = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AC();
     await this.ctx.resume();
@@ -148,6 +149,11 @@ const Mic = {
           acc = 0; cnt = 0;
           if (n === this.CHUNK) {
             const chunk = Voice.busy() ? new Int16Array(this.CHUNK) : out;
+            if (this.onlevel) {             // RMS of the 100 ms chunk, 0..1, for the meter
+              let s = 0;
+              for (let k = 0; k < out.length; k++) s += (out[k] / 32768) ** 2;
+              this.onlevel(Math.min(1, Math.sqrt(s / out.length) * 4));
+            }
             this.onchunk && this.onchunk(chunk.buffer);
             out = new Int16Array(this.CHUNK); n = 0;
           }
@@ -175,14 +181,23 @@ const Mic = {
     if (this.ctx) this.ctx.close().catch(() => {});
     this.ctx = this.src = this.node = this.sink = null;
     this.onchunk = null;
+    this.onlevel = null;
   },
 };
 
 /* ------------------------------------------------------------ capture */
 
+/* Recording a job is the expert's one shot, so the screen tells them exactly
+ * where they are: a countdown before it starts, a job clock with a guide
+ * length and a hard limit, a live mic level, pause and resume, and a "Mark
+ * step" button (or saying "next step") to set step boundaries themselves. */
+const CAPTURE_GUIDE_S = [60, 300];   // "aim for 1 to 5 minutes"
+const CAPTURE_LIMIT_S = 600;         // 10 minutes, then it stops and builds
+
 const Capture = {
-  ws: null, timer: null, recorder: null, chunks: [], recording: false,
+  ws: null, timer: null, clock: null, recorder: null, chunks: [], recording: false,
   connecting: false, processing: false, streamingMic: false, frames: 0,
+  paused: false, startedAt: 0, pausedAt: 0, pausedTotal: 0, warned: false, steps: 1,
 
   async open() {
     show('capture');
@@ -196,18 +211,67 @@ const Capture = {
     }
     this.resetButton();
     this.clearDrafts();
-    $('cap-status').textContent = 'Describe each step out loud as you do it.';
+    this.setState('ready', 'ready');
+    $('cap-time').textContent = '0:00';
+    $('cap-limit').style.width = '0%';
+    $('cap-status').textContent =
+      'Aim for 1 to 5 minutes. Say each step out loud as you do it, or tap Mark step between steps.';
     $('cap-btn').onclick = () => (this.recording ? this.stop() : this.start());
+    $('cap-pause').onclick = () => (this.paused ? this.resume() : this.pause());
+    $('cap-mark').onclick = () => this.mark();
   },
 
-  start() {
+  /* ---- clock ---------------------------------------------------------- */
+  elapsed() {
+    if (!this.startedAt) return 0;
+    const now = this.paused ? this.pausedAt : Date.now();
+    return Math.max(0, (now - this.startedAt - this.pausedTotal) / 1000);
+  },
+
+  tick() {
+    const s = this.elapsed();
+    $('cap-time').textContent = mmss(s);
+    $('cap-limit').style.width = Math.min(100, (s / CAPTURE_LIMIT_S) * 100) + '%';
+    $('cap-limit').classList.toggle('warn', s >= CAPTURE_LIMIT_S - 60);
+    if (!this.warned && s >= CAPTURE_LIMIT_S - 60) {
+      this.warned = true;
+      $('cap-status').textContent = 'One minute left. Finish the step you are on.';
+      Voice.say('One minute left.');
+    }
+    if (s >= CAPTURE_LIMIT_S && this.recording) {
+      $('cap-status').textContent = 'Ten minute limit reached. Building your procedure.';
+      this.stop();
+    }
+  },
+
+  setState(state, label) {
+    $('cap-clock').className = 'rec-clock ' + state;
+    $('cap-state').textContent = label;
+  },
+
+  /* ---- start ---------------------------------------------------------- */
+  async start() {
     // One tap, one socket: a second tap while connecting used to open a second
     // capture socket and split the frames from the stop message.
     if (this.connecting || this.recording) return;
     this.connecting = true;
-    this.frames = 0;
-    this.clearDrafts();
     $('cap-btn').disabled = true;
+
+    // 3-2-1 so the expert's hands are on the job before the first frame.
+    const count = $('cap-count');
+    for (const n of ['3', '2', '1']) {
+      count.textContent = n;
+      count.classList.add('on');
+      await new Promise((r) => setTimeout(r, 750));
+    }
+    count.classList.remove('on');
+
+    this.frames = 0;
+    this.steps = 1;
+    this.warned = false;
+    this.paused = false;
+    this.pausedTotal = 0;
+    this.clearDrafts();
     $('cap-btn').textContent = 'Connecting…';
     this.ws = new WebSocket(WS_BASE + '/ws/capture');
     this.ws.binaryType = 'arraybuffer';
@@ -217,12 +281,18 @@ const Capture = {
       this.connecting = false;
       this.ws.send(JSON.stringify({ type: 'start' }));
       this.recording = true;
+      this.startedAt = Date.now();
+      clearInterval(this.clock);
+      this.clock = setInterval(() => this.tick(), 250);
+      this.setState('recording', 'recording');
       $('cap-btn').disabled = false;
-      $('cap-btn').textContent = 'Stop & build procedure';
+      $('cap-btn').textContent = 'Stop & build';
       $('cap-btn').classList.add('stop');
-      $('cap-badge').classList.add('rec');
+      $('cap-pause').hidden = false;
+      $('cap-mark').hidden = false;
+      $('cap-pause').textContent = 'Pause';
       this.setBadge();
-      $('cap-status').textContent = 'Listening. Say each step as you do it.';
+      $('cap-status').textContent = 'Recording. Say each step as you do it. Say "next step" to start a new one.';
 
       // First frame now, then sample on an interval. Even a short take has frames.
       this.sendFrame();
@@ -230,9 +300,9 @@ const Capture = {
 
       // Narration streams live: captions and step cards appear as you talk.
       try {
-        await Mic.start(MediaSource_.stream, (buf) => {
-          if (this.ws && this.ws.readyState === 1) this.ws.send(buf);
-        });
+        await Mic.start(MediaSource_.stream,
+          (buf) => { if (!this.paused && this.ws && this.ws.readyState === 1) this.ws.send(buf); },
+          (level) => { $('cap-level').style.width = (this.paused ? 0 : Math.round(level * 100)) + '%'; });
         this.streamingMic = true;
       } catch (err) {
         // Fall back to recording the narration and uploading it at the end.
@@ -256,15 +326,16 @@ const Capture = {
       if (msg.type === 'heard') this.caption(msg.text, msg.final);
       if (msg.type === 'draft') this.addDraft(msg);
       if (msg.type === 'draft_title') this.titleDraft(msg);
+      if (msg.type === 'marker') this.addMarker(msg);
       if (msg.type === 'status') $('cap-status').textContent = msg.message;
       if (msg.type === 'error') {
         $('cap-status').textContent = msg.message;
         this.resetButton();
       }
       if (msg.type === 'procedure') {
+        this.setState('saved', 'saved');
         $('cap-status').textContent =
           `Saved "${msg.procedure.title}". ${msg.procedure.steps.length} steps. Opening your procedures…`;
-        $('cap-badge').textContent = 'saved';
         Voice.say(`Procedure saved. ${msg.procedure.steps.length} steps.`);
         setTimeout(() => Library.open(msg.procedure_id), 1600);
       }
@@ -276,20 +347,57 @@ const Capture = {
         $('cap-status').textContent = 'Lost the connection to the server. Check the laptop is running, then try again.';
         this.connecting = this.recording = this.processing = false;
         clearInterval(this.timer);
+        clearInterval(this.clock);
         Mic.stop();
         this.resetButton();
       }
     };
   },
 
+  /* ---- pause / resume / mark -------------------------------------------- */
+  pause() {
+    if (!this.recording || this.paused) return;
+    this.paused = true;
+    this.pausedAt = Date.now();
+    clearInterval(this.timer);
+    this.send({ type: 'pause' });
+    this.setState('paused', 'paused');
+    $('cap-pause').textContent = 'Resume';
+    $('cap-mark').disabled = true;
+    $('cap-level').style.width = '0%';
+    $('cap-status').textContent = 'Paused. Nothing is being recorded. Tap Resume to carry on.';
+  },
+
+  resume() {
+    if (!this.paused) return;
+    this.pausedTotal += Date.now() - this.pausedAt;
+    this.paused = false;
+    this.send({ type: 'resume' });
+    this.sendFrame();
+    this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
+    this.setState('recording', 'recording');
+    $('cap-pause').textContent = 'Pause';
+    $('cap-mark').disabled = false;
+    $('cap-status').textContent = 'Recording again.';
+  },
+
+  mark() {
+    if (!this.recording || this.paused) return;
+    this.sendFrame();                // the frame at the boundary is worth keeping
+    this.send({ type: 'mark' });
+  },
+
+  send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); },
+
   sendFrame() {
+    if (this.paused) return;
     const data = MediaSource_.grab($('cap-video'));
     if (data && this.ws && this.ws.readyState === 1) {
       this.ws.send(JSON.stringify({ type: 'frame', data }));
     }
   },
 
-  setBadge() { $('cap-badge').textContent = `recording · ${this.frames || 0} frames`; },
+  setBadge() { $('cap-badge').textContent = `${this.frames || 0} frames`; },
 
   caption(text, final) {
     const el = $('cap-heard');
@@ -315,6 +423,15 @@ const Capture = {
     d.scrollTop = d.scrollHeight;
   },
 
+  addMarker({ n, at }) {
+    const d = $('cap-drafts');
+    const el = document.createElement('div');
+    el.className = 'marker';
+    el.textContent = `Step ${n} starts · ${at}`;
+    d.appendChild(el);
+    d.scrollTop = d.scrollHeight;
+  },
+
   titleDraft({ n, title }) {
     const card = document.querySelector(`#cap-drafts .draft[data-n="${n}"] .draft-title`);
     if (card) card.textContent = title;
@@ -322,23 +439,30 @@ const Capture = {
 
   resetButton() {
     this.processing = false;
+    clearInterval(this.clock);
     $('cap-btn').disabled = false;
     $('cap-btn').textContent = 'Start recording';
     $('cap-btn').classList.remove('stop');
-    $('cap-badge').classList.remove('rec');
-    $('cap-badge').textContent = 'ready';
+    $('cap-pause').hidden = true;
+    $('cap-mark').hidden = true;
+    $('cap-mark').disabled = false;
+    $('cap-level').style.width = '0%';
+    this.setState('ready', 'ready');
   },
 
   async stop() {
     if (!this.recording) return;
+    if (this.paused) this.resume();  // fold the paused time back before stopping
     this.recording = false;
     this.processing = true;
     clearInterval(this.timer);
+    clearInterval(this.clock);
     this.sendFrame();   // the end state of the job is the most useful frame
+    this.setState('building', 'building');
     $('cap-btn').textContent = 'Building your procedure…';
     $('cap-btn').disabled = true;
-    $('cap-badge').textContent = 'processing';
-    $('cap-badge').classList.remove('rec');
+    $('cap-pause').hidden = true;
+    $('cap-mark').hidden = true;
 
     if (this.streamingMic) {
       // Give the last words a moment to reach the server, then stop the mic.
@@ -358,14 +482,21 @@ const Capture = {
 
   teardown() {
     clearInterval(this.timer);
+    clearInterval(this.clock);
     Mic.stop();
     if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
-    this.recording = this.connecting = this.processing = false;
+    this.recording = this.connecting = this.processing = this.paused = false;
+    this.startedAt = 0;
     if (this.ws) { const ws = this.ws; this.ws = null; ws.onclose = null; try { ws.close(); } catch (_) {} }
     MediaSource_.stop();
     Voice.stop();
   },
 };
+
+function mmss(s) {
+  s = Math.floor(s);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
 
 /* ------------------------------------------------------------ library */
 
@@ -555,6 +686,7 @@ const Guide = {
           if (msg.step !== this.step && msg.target !== undefined) LiveBox.reset(msg.target);
           this.step = msg.step;
         }
+        if (msg.kind !== undefined) this.setSpec(msg);
         $('guide-progress').classList.remove('warn');
         if (msg.title !== undefined) $('guide-step-title').textContent = msg.title || '';
         $('guide-instruction').textContent = msg.text;
@@ -597,10 +729,12 @@ const Guide = {
 
       case 'verdict':
         this.resetDone();
-        flash(msg.verdict);
-        LiveBox.flash(msg.verdict);
         this.setLive('watching', 'Watching');
-        if (msg.source === 'auto' && msg.advance) this.toast('Verified automatically');
+        if (msg.verdict === 'wait') break;          // timed step: the spoken countdown says it
+        flash(msg.verdict === 'confirmed' ? 'pass' : msg.verdict);
+        LiveBox.flash(msg.verdict === 'confirmed' ? 'pass' : msg.verdict);
+        if (msg.verdict === 'confirmed') this.toast('Confirmed by voice');
+        else if (msg.source === 'auto' && msg.advance) this.toast('Verified automatically');
         else if (msg.latency_ms) this.toast(`${msg.verdict === 'pass' ? 'Verified' : msg.verdict === 'fail' ? 'Caught' : 'Need a better view'} · ${(msg.latency_ms / 1000).toFixed(1)} s`);
         break;
 
@@ -613,6 +747,34 @@ const Guide = {
         this.setLive('watching', 'Watching');
         $('guide-instruction').textContent = msg.message;
         break;
+    }
+  },
+
+  /* What kind of check this step is: a gauge reading to hit, a timer to
+   * wait out, or a check only the operator can confirm. */
+  setSpec({ kind, reading, duration }) {
+    const el = $('guide-spec');
+    clearInterval(this.specTimer);
+    el.className = 'step-spec ' + (kind || 'visual');
+    if (kind === 'reading' && reading) {
+      el.textContent = `Read: ${reading}`;
+      el.hidden = false;
+    } else if (kind === 'timed' && duration) {
+      const end = Date.now() + duration * 1000;
+      const draw = () => {
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+        el.textContent = left > 0 ? `Timer ${mmss(left)}` : 'Time is up. Say done.';
+        el.classList.toggle('up', left === 0);
+        if (left === 0) { clearInterval(this.specTimer); Voice.say('Time is up.'); }
+      };
+      draw();
+      this.specTimer = setInterval(draw, 500);
+      el.hidden = false;
+    } else if (kind === 'confirm') {
+      el.textContent = 'Not visible to the camera. Say done once you have checked it.';
+      el.hidden = false;
+    } else {
+      el.hidden = true;
     }
   },
 
@@ -670,6 +832,8 @@ const Guide = {
     MediaSource_.stop();
     Voice.stop();
     LiveBox.stop();
+    clearInterval(this.specTimer);
+    $("guide-spec").hidden = true;
   },
 };
 

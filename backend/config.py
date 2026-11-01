@@ -71,6 +71,12 @@ AUTO_CONFIDENCE = float(os.getenv("AUTO_CONFIDENCE", "0.8"))
 GROUNDING_FRESH_S = float(os.getenv("GROUNDING_FRESH_S", "2.5"))
 VOICE = os.getenv("VOICE", "1") != "0"
 
+# Muse Spark reasoning effort per call type (measured on fixed frames: default
+# ~4 s and up to 23 s live, low ~2.4 s, minimal ~1.8 s, all 6/6 correct).
+JUDGE_EFFORT = os.getenv("JUDGE_EFFORT", "low")          # operator said "done": must be right
+WATCH_EFFORT = os.getenv("WATCH_EFFORT", "minimal")      # background look; two passes must agree
+JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "1600"))
+
 # --------------------------------------------------------------------------
 # Spend. Every call is metered at list price (dev.meta.ai/docs/pricing-rate-
 # limits) into the usage table. Near the budget, live watching switches off

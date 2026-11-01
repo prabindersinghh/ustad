@@ -82,6 +82,11 @@
   .muted{color:var(--muted)}
   .hint{font-size:14px;color:var(--muted);padding:12px 2px}
   code{color:var(--blue-600);font-weight:600}
+  .struggle{margin-bottom:14px;padding:14px 16px;border-radius:14px;background:#fdecec;border:1px solid #f6c9cb;color:#7a1f22;font-size:14px;line-height:1.5}
+  .struggle b{color:#5c1013}
+  .pill.kind{color:var(--blue-600);border-color:#c4dcff;background:#eef5ff}
+  .stepstat{margin-top:8px !important;color:var(--blue-600) !important;font-weight:600}
+  .step.inferred{border-left-color:var(--blue)} .step.confirmed{border-left-color:var(--ok)}
   .spend{margin-bottom:26px}
   .spend-body{padding:16px 20px 18px}
   .spend-top{font-size:14px;color:var(--ink-soft);margin-bottom:10px}
@@ -192,20 +197,42 @@ getJSON('/api/procedures').then((ps)=>{
   });
 }).catch(()=>{ $('proc-rows').innerHTML='<div class="empty">Could not load procedures.</div>'; });
 
+const KIND = { visual:'Camera check', reading:'Gauge reading', timed:'Timed', confirm:'Operator confirms' };
+function specOf(r){
+  if(!r) return '';
+  const u = r.unit ? ' '+r.unit : '';
+  if(r.min!=null && r.max!=null) return `${r.what}: ${r.min} to ${r.max}${u}`;
+  return r.min!=null ? `${r.what}: at least ${r.min}${u}` : `${r.what}: at most ${r.max}${u}`;
+}
+
 async function showProcedure(id){
-  const p = await getJSON('/api/procedures/'+id);
+  const [p, ins] = await Promise.all([getJSON('/api/procedures/'+id), getJSON(`/api/procedures/${id}/insights`).catch(()=>null)]);
+  const stat = {}; (ins && ins.steps || []).forEach((s)=>{ stat[s.step] = s; });
+  const hardest = ins && ins.hardest_step ? p.steps[ins.hardest_step-1] : null;
   let html = `<section class="panel"><h2>${esc(p.title)}
-      <span class="count">${p.steps.length} steps${p.machine?' · '+esc(p.machine):''}</span></h2>
-      <div style="padding:16px 18px"><div class="steps">`;
+      <span class="count">${p.steps.length} steps${p.machine?' · '+esc(p.machine):''}${ins&&ins.runs?` · ${ins.runs} guided run${ins.runs>1?'s':''}`:''}</span></h2>
+      <div style="padding:16px 18px">`;
+  if(hardest){
+    const h = stat[ins.hardest_step];
+    html += `<div class="struggle"><b>Where operators struggle: step ${ins.hardest_step}, ${esc(hardest.title)}.</b>
+      ${h.caught} error${h.caught>1?'s':''} caught, ${Math.round((h.first_try_rate||0)*100)}% right first time${h.median_s!=null?`, ${h.median_s} s median`:''}.
+      ${h.reasons.length?`Most recent: "${esc(h.reasons[0])}"`:''}</div>`;
+  }
+  html += `<div class="steps">`;
   p.steps.forEach((s)=>{
-    html += `<div class="step">
+    const st = stat[s.index+1];
+    const kind = s.check || 'visual';
+    html += `<div class="step${hardest && s.index+1===ins.hardest_step?' fail':''}">
       <div>
-        <div class="h">${s.index+1}. ${esc(s.title)}</div>
+        <div class="h">${s.index+1}. ${esc(s.title)} <span class="pill kind">${KIND[kind]||kind}</span>
+          ${kind==='timed'&&s.duration_s?`<span class="pill">${s.duration_s} s</span>`:''}</div>
         <div class="kv"><b>Say:</b> ${esc(s.instruction)}</div>
         <div class="kv"><b>Target phrase:</b> <code>${esc(s.target_phrase||'n/a')}</code></div>
         <div class="kv"><b>Success criteria:</b> ${esc(s.success_criteria||'n/a')}</div>
+        ${s.reading?`<div class="kv"><b>Required reading:</b> ${esc(specOf(s.reading))}</div>`:''}
         ${s.common_mistake?`<div class="kv"><b>Common mistake:</b> ${esc(s.common_mistake)}</div>`:''}
         ${s.hazard?`<div class="kv"><b>Hazard:</b> ${esc(s.hazard)}</div>`:''}
+        ${st?`<div class="kv stepstat">${Math.round((st.first_try_rate||0)*100)}% right first time · ${st.caught} caught${st.inferred?` · ${st.inferred} inferred`:''}${st.skipped?` · ${st.skipped} skipped`:''}${st.median_s!=null?` · ${st.median_s} s median`:''}</div>`:''}
       </div>
       <div class="noimg">grounded by<br>SAM 3.1</div>
     </div>`;
@@ -256,7 +283,7 @@ async function showSession(id){
     html += `<div class="step ${esc(e.verdict)}">
       <div>
         <div class="h">Step ${e.step_index+1}
-          <span class="pill ${e.verdict==='pass'?'ok':e.verdict==='fail'?'bad':'warn'}">${esc(e.verdict)}${conf}</span>
+          <span class="pill ${({pass:'ok',confirmed:'ok',fail:'bad',inferred:'kind'})[e.verdict]||'warn'}">${esc(e.verdict)}${conf}</span>
           ${e.backend?`<span class="pill backend">${esc(e.backend)}</span>`:''}
           ${e.latency_ms?`<span class="muted" style="font-size:12px">${e.latency_ms}ms</span>`:''}
         </div>

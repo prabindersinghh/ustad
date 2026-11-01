@@ -163,11 +163,21 @@ def reason(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
     force_hosted: bool = False,
+    effort: str | None = None,
+    max_output_tokens: int | None = None,
+    cache_key: str | None = None,
 ) -> Any:
     """One reasoning turn, on whichever backend is active.
 
     `force_hosted` pins a call to the Meta Model API regardless of config --
     used where a capability only the hosted models have is required.
+
+    `effort` sets Muse Spark's hidden reasoning (minimal/low/medium/high). It
+    is the main lever on latency: a step check at the default effort spent
+    up to 4,300 reasoning tokens (23 s); at `low` it judged the same frames
+    as accurately in about 2.4 s. `max_output_tokens` caps visible plus
+    reasoning tokens so one check can never run away. `cache_key` groups calls
+    that share a long fixed prefix (system prompt + tools) for prompt caching.
     """
     if not force_hosted and active_backend() == "open":
         try:
@@ -184,6 +194,12 @@ def reason(
     }
     if tools:
         kwargs["tools"] = tools
+    if effort:
+        kwargs["reasoning"] = {"effort": effort}
+    if max_output_tokens:
+        kwargs["max_output_tokens"] = max_output_tokens
+    if cache_key:
+        kwargs["prompt_cache_key"] = cache_key
     resp = client().responses.create(**kwargs)
     _meter_tokens(kwargs["model"], getattr(resp, "usage", None))
     try:
@@ -284,12 +300,14 @@ def reason_json(
     content: list[dict[str, Any]],
     *,
     model: str | None = None,
+    effort: str | None = None,
 ) -> Any:
     """Muse Spark turn that must return JSON. Tolerant of fenced output."""
     resp = reason(
         instructions + "\n\nRespond with JSON only. No prose, no code fences.",
         content,
         model=model,
+        effort=effort,
     )
     text = (getattr(resp, "output_text", "") or "").strip()
 

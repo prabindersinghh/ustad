@@ -102,6 +102,7 @@ class GuideSession:
         self.hazard_spoken_gen = -1
         self.last_flag: dict[str, Any] | None = None
         self.finished = False
+        self.skipped: list[int] = []      # step indexes skipped; audited at the end
         self.voice: VoiceRelay | None = None
         self.watcher: asyncio.Task | None = None
         self.judging: asyncio.Task | None = None
@@ -124,11 +125,32 @@ class GuideSession:
         self.last_flag = None
         step = self.step
         prefix = f"Warning. {step['hazard']} " if step.get("hazard") else ""
+        spec = guide.reading_spec(step)
+        kind = step.get("check") or "visual"
+        duration = int(step.get("duration_s") or 0)
+        suffix = ""
+        if spec:
+            suffix = f" It should read {spec}."
+        if kind == "timed" and duration:
+            suffix += f" Timer: {duration} seconds."
+        if kind == "confirm":
+            suffix += " Say done when you've checked it."
         await self.speak(
-            prefix + step["instruction"],
+            prefix + step["instruction"] + suffix,
             step=self.idx + 1, of=len(self.proc["steps"]),
             title=step.get("title", ""), target=step.get("target_phrase", ""),
+            kind=kind, reading=spec, duration=duration if kind == "timed" else 0,
         )
+
+    def _upcoming(self) -> list[dict[str, Any]]:
+        assert self.proc is not None
+        return self.proc["steps"][self.idx + 1: self.idx + 4]
+
+    def _timer_left(self) -> float:
+        step = self.step
+        if (step.get("check") or "visual") != "timed":
+            return 0.0
+        return max(0.0, float(step.get("duration_s") or 0) - (time.monotonic() - self.step_started))
 
     async def _begin(self, proc: dict[str, Any], session_id: str, idx: int, resumed: bool) -> None:
         self.proc, self.session_id, self.idx, self.attempt = proc, session_id, idx, 1
@@ -167,7 +189,8 @@ class GuideSession:
             if not proc:
                 await self.out.send({"type": "error", "message": "Unknown procedure"})
                 return True
-            passed = [e["step_index"] for e in record["events"] if e["verdict"] == "pass"]
+            passed = [e["step_index"] for e in record["events"]
+                      if e["verdict"] in ("pass", "inferred", "confirmed")]
             idx = (max(passed) + 1) if passed else 0
             if idx >= len(proc["steps"]):
                 self.session_id = sid
@@ -300,6 +323,9 @@ class GuideSession:
                 # A SAM round trip takes ~2 s, so up to WATCH_GROUND_PARALLEL
                 # run at once; that roughly doubles how often the box moves.
                 inflight = {t for t in inflight if not t.done()}
+                kind = self.step.get("check") or "visual"
+                if kind == "confirm" or not self.step.get("target_phrase"):
+                    continue                      # nothing to see: no SAM, no background judge
                 if (frame_at > last_ground_frame_at
                         and now - last_ground >= config.WATCH_GROUND_INTERVAL_S
                         and len(inflight) < config.WATCH_GROUND_PARALLEL):
@@ -319,7 +345,8 @@ class GuideSession:
                            and now - last_judge >= config.WATCH_JUDGE_INTERVAL_S)
                 if (config.AUTO_ADVANCE and due and not self.busy and g.gen == self.gen
                         and (self.judging is None or self.judging.done())
-                        and now - self.step_started >= config.WATCH_JUDGE_AFTER_S):
+                        and now - self.step_started >= config.WATCH_JUDGE_AFTER_S
+                        and self._timer_left() == 0):    # a timed step can't finish early
                     last_judge = now
                     self.judging = asyncio.create_task(self._background_judge(g))
         except asyncio.CancelledError:
@@ -351,6 +378,7 @@ class GuideSession:
             action = await asyncio.to_thread(
                 guide.judge_step, step, g.frame, attempt=attempt, detections=g.detections,
                 worker_said="(nothing; this is a background look while they work)",
+                upcoming=self._upcoming(), effort=config.WATCH_EFFORT,
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("background judge failed: %s", exc)
@@ -391,6 +419,27 @@ class GuideSession:
         try:
             async with self.lock:
                 gen0, step = self.gen, self.step
+                kind = step.get("check") or "visual"
+
+                # A timed step is done when its time is up, not before.
+                left = self._timer_left()
+                if left > 2:
+                    await self.speak(f"{int(left)} seconds left on the timer.", step=self.idx + 1,
+                                     of=len(self.proc["steps"]))
+                    await self.out.send({"type": "verdict", "verdict": "wait", "say": "", "advance": False,
+                                         "detail": {}, "step": self.idx + 1, "source": source})
+                    return
+
+                # Some checks can't be seen (listen for the click, smell for
+                # solvent). The operator's word is the record, and it says so.
+                if kind == "confirm":
+                    action = {"tool": "confirm", "say": "Got it.", "verdict": "confirmed",
+                              "detail": {"reason": f"Operator confirmed by voice: \"{said}\" (not visually checkable)"},
+                              "latency_ms": int((time.monotonic() - t0) * 1000), "grounding": "Grounding: not applicable.",
+                              "detections": [], "backend": "none"}
+                    await self._finish(action, self.latest[0] if self.latest else b"", source=source)
+                    return
+
                 dets = None
                 g = self.grounding
                 if frame is None:
@@ -405,6 +454,7 @@ class GuideSession:
                     return
                 action = await asyncio.to_thread(
                     guide.judge_step, step, frame, worker_said=said, attempt=self.attempt, detections=dets,
+                    upcoming=self._upcoming(),
                 )
                 if gen0 != self.gen:
                     return                  # the step moved on (auto-advance) meanwhile
@@ -433,13 +483,28 @@ class GuideSession:
             await self.speak(say, step=self.idx + 1, of=n)
 
         if action["advance"]:
-            self.idx += 1
+            # The operator may already have gone ahead: the judge reports the
+            # furthest later step whose end state it can see. The steps in
+            # between are credited as "inferred" (not "pass") with the same
+            # photo, so the record says exactly how each one was established.
+            through = action["detail"].get("completed_through")
+            next_idx = self.idx + 1
+            if isinstance(through, (int, float)) and self.idx + 1 < int(through) <= n:
+                through = int(through)
+                for j in range(self.idx + 1, through):
+                    db.log_step_event(
+                        self.session_id, j, "inferred",
+                        reason=f"End state of step {through} seen while checking step {self.idx + 1}",
+                        evidence_path=action.get("evidence_path"), attempt=1,
+                        latency_ms=action.get("latency_ms"), backend=action.get("backend"),
+                    )
+                await self.speak(f"Steps {self.idx + 2} to {through} are already done.", step=self.idx + 1, of=n)
+                log.info("jumped from step %d to %d on visible end state", self.idx + 1, through)
+                next_idx = through
+            self.idx = next_idx
             self.attempt = 1
             if self.idx >= n:
-                self.finished = True
-                db.finish_session(self.session_id, "completed")
-                await self.out.send({"type": "complete", "session_id": self.session_id})
-                await self.speak("Procedure complete. Well done.")
+                await self._complete(frame)
             else:
                 await self.announce_step()
         else:
@@ -449,18 +514,52 @@ class GuideSession:
             if action["verdict"] == "fail":
                 self.last_flag = action["detail"]
 
+    async def _complete(self, frame: bytes | None) -> None:
+        """End of the job. If steps were skipped, look at the finished state
+        once and credit each skipped step whose end state is visibly there."""
+        assert self.proc is not None and self.session_id is not None
+        self.finished = True
+        outcome, summary = "completed", "Procedure complete. Well done."
+        frame = frame or (self.latest[0] if self.latest else None)
+        if self.skipped and frame:
+            steps = [self.proc["steps"][i] for i in self.skipped]
+            try:
+                verdicts = await asyncio.to_thread(guide.audit_skipped, steps, frame)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("final audit failed: %s", exc)
+                verdicts = {}
+            covered = []
+            for i in self.skipped:
+                v = verdicts.get(i, {})
+                if v.get("status") == "satisfied":
+                    covered.append(i + 1)
+                    db.log_step_event(self.session_id, i, "inferred",
+                                      reason=f"[final audit] {v.get('why', 'end state satisfied')}", attempt=1)
+            missing = [i + 1 for i in self.skipped if i + 1 not in covered]
+            if missing:
+                outcome = "completed_with_skips"
+                summary = (f"Done, but step{'s' if len(missing) > 1 else ''} "
+                           f"{', '.join(map(str, missing))} couldn't be confirmed from the end result.")
+            else:
+                summary = "Done. The skipped steps check out in the finished result."
+            log.info("final audit: skipped %s, covered %s", [i + 1 for i in self.skipped], covered)
+        elif self.skipped:
+            outcome = "completed_with_skips"
+        db.finish_session(self.session_id, outcome)
+        await self.out.send({"type": "complete", "session_id": self.session_id})
+        await self.speak(summary)
+
     async def skip(self) -> None:
         if self.proc is None or self.session_id is None:
             return
         async with self.lock:
             db.log_step_event(self.session_id, self.idx, "skipped",
                               reason="Manually skipped by operator", attempt=self.attempt)
+            self.skipped.append(self.idx)
             self.idx += 1
             self.attempt = 1
             if self.idx >= len(self.proc["steps"]):
-                self.finished = True
-                db.finish_session(self.session_id, "completed_with_skips")
-                await self.out.send({"type": "complete", "session_id": self.session_id})
+                await self._complete(self.latest[0] if self.latest else None)
             else:
                 await self.announce_step()
 
@@ -506,9 +605,23 @@ class CaptureSession:
         self.hint: str | None = None
         self.t0 = time.monotonic()
         self.recording = False
+        self.paused_at: float | None = None
+        self.paused_total = 0.0
+
+    def elapsed(self) -> float:
+        """Recording time, excluding pauses: what the job clock should show."""
+        now = self.paused_at if self.paused_at is not None else time.monotonic()
+        return now - self.t0 - self.paused_total
 
     async def status(self, message: str) -> None:
         await self.out.send({"type": "status", "message": message})
+
+    async def mark_step(self, source: str) -> None:
+        """The expert marked the start of a new step (button or "next step")."""
+        at = self.elapsed()
+        self.turns.append({"n": None, "text": "[step marker]", "at": at, "frame": max(0, len(self.keyframes) - 1)})
+        n = sum(1 for t in self.turns if t["text"] == "[step marker]") + 1
+        await self.out.send({"type": "marker", "n": n, "at": _mmss(at), "source": source})
 
     async def on_text(self, msg: dict[str, Any]) -> bool:
         kind = msg.get("type")
@@ -517,9 +630,23 @@ class CaptureSession:
             self.recording = True
             self.hint = msg.get("hint") or None
             await self.status("Recording. Narrate each step as you do it.")
+        elif kind == "pause":
+            if self.recording and self.paused_at is None:
+                self.paused_at = time.monotonic()
+                await self.out.send({"type": "paused", "at": _mmss(self.elapsed())})
+        elif kind == "resume":
+            if self.paused_at is not None:
+                self.paused_total += time.monotonic() - self.paused_at
+                self.paused_at = None
+                await self.out.send({"type": "resumed", "at": _mmss(self.elapsed())})
+        elif kind == "mark":
+            if self.recording:
+                await self.mark_step("tap")
         elif kind == "frame":
+            if self.paused_at is not None:
+                return True                       # nothing is captured while paused
             self.keyframes.append(decode_frame(msg["data"]))
-            self.frame_times.append(time.monotonic() - self.t0)
+            self.frame_times.append(self.elapsed())
             await self.out.send({"type": "frame_ack", "count": len(self.keyframes)})
         elif kind == "audio":                 # whole-recording upload (fallback path)
             self.audio_blobs.append(base64.b64decode(msg["data"]))
@@ -532,7 +659,7 @@ class CaptureSession:
         return True
 
     async def on_audio(self, pcm: bytes) -> None:
-        if not self.recording:
+        if not self.recording or self.paused_at is not None:
             return
         self.pcm.extend(pcm)
         if not config.VOICE:
@@ -546,8 +673,18 @@ class CaptureSession:
         await self.out.send({"type": "heard", "text": text, "final": final})
         if not final:
             return
-        at = time.monotonic() - self.t0
-        turn = {"n": len(self.turns) + 1, "text": text, "at": at, "frame": max(0, len(self.keyframes) - 1)}
+        if self.paused_at is not None:
+            return
+        # "Next step, open the valve..." marks a step boundary, then narrates.
+        low = text.lower().lstrip(" ,.")
+        if low.startswith("next step"):
+            await self.mark_step("voice")
+            text = text.lstrip(" ,.")[len("next step"):].lstrip(" ,.:")
+            if not text:
+                return
+        at = self.elapsed()
+        n = sum(1 for t in self.turns if t["n"] is not None) + 1
+        turn = {"n": n, "text": text, "at": at, "frame": max(0, len(self.keyframes) - 1)}
         self.turns.append(turn)
         await self.out.send({"type": "draft", "n": turn["n"], "text": text, "at": _mmss(at)})
         asyncio.create_task(self._title(turn))
@@ -560,6 +697,7 @@ class CaptureSession:
                 "Turn this spoken instruction from a technician into a 2 to 5 word step title "
                 "in the imperative. Output only the title, no punctuation at the end.",
                 [{"type": "input_text", "text": turn["text"]}],
+                effort="minimal", max_output_tokens=400,
             )
             title = (getattr(resp, "output_text", "") or "").strip().strip('".')
             if title and len(title) < 60:
@@ -583,7 +721,8 @@ class CaptureSession:
         if self.voice:
             await asyncio.sleep(1.2)
 
-        transcript = self._narration()
+        spoke = any(t["n"] is not None for t in self.turns)
+        transcript = self._narration() if spoke else ""
         if not transcript:
             await self.status(f"Captured {len(self.keyframes)} keyframes. Transcribing…")
             audio, name = None, "capture.m4a"
@@ -599,6 +738,10 @@ class CaptureSession:
                     log.exception("Transcription failed")
                     await self.status("Couldn't transcribe the narration; writing from the video alone.")
 
+        markers = [t for t in self.turns if t["n"] is None]
+        if markers and not spoke:
+            transcript = (transcript + "\n" if transcript else "") + "\n".join(
+                f"[{_mmss(t['at'])}] [step marker]" for t in markers)
         await self.status("Writing the procedure…")
         try:
             proc = await asyncio.to_thread(

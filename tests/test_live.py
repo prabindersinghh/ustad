@@ -94,7 +94,7 @@ def ctx(tmp_path, monkeypatch):
 
     plan = {"tool": "verify_step"}
 
-    def fake_judge(step, frame, *, worker_said=None, attempt=1, detections=None):
+    def fake_judge(step, frame, *, worker_said=None, attempt=1, detections=None, **_):
         calls["judge"].append({"said": worker_said, "pre_grounded": detections is not None})
         return dict(_action(plan["tool"]))
 
@@ -202,3 +202,156 @@ def test_still_view_keeps_grounding_fresh_without_sam(ctx):
         _until(ws, "verdict")
         ws.send_json({"type": "abort"})
     assert calls["ground"] == grounded            # no extra SAM calls for a still view
+
+
+# ---------------------------------------------------------------- smarter guide
+
+def _verify(**extra):
+    a = _action("verify_step")
+    a["detail"] = {**a["detail"], **extra}
+    return a
+
+
+def test_jump_ahead_credits_steps_in_between(ctx, monkeypatch):
+    client, pid, calls, plan, db = ctx
+    from backend import guide
+    monkeypatch.setattr(guide, "judge_step", lambda *a, **k: _verify(completed_through=2))
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "check", "data": FRAME, "said": "done"})
+        _until(ws, "complete")
+    sid = db.list_sessions()[0]["id"]
+    ev = {e["step_index"]: e["verdict"] for e in db.session_log(sid)["events"]}
+    assert ev == {0: "pass", 1: "inferred"}
+    assert db.session_log(sid)["session"]["outcome"] == "completed"
+
+
+def test_skipped_step_satisfied_in_final_state_counts(ctx, monkeypatch):
+    client, pid, calls, plan, db = ctx
+    from backend import guide
+    monkeypatch.setattr(guide, "judge_step", lambda *a, **k: _verify())
+    monkeypatch.setattr(guide, "audit_skipped",
+                        lambda steps, frame: {0: {"status": "satisfied", "why": "valve visibly closed"}})
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "watch", "data": FRAME})
+        ws.send_json({"type": "skip"})                       # skip step 1
+        ws.send_json({"type": "check", "said": "done"})       # pass step 2 (the last)
+        _until(ws, "complete")
+    sid = db.list_sessions()[0]["id"]
+    log = db.session_log(sid)
+    assert log["session"]["outcome"] == "completed"
+    assert any(e["step_index"] == 0 and e["verdict"] == "inferred" and "final audit" in e["reason"]
+               for e in log["events"])
+
+
+def test_skipped_step_not_visible_stays_flagged(ctx, monkeypatch):
+    client, pid, calls, plan, db = ctx
+    from backend import guide
+    monkeypatch.setattr(guide, "judge_step", lambda *a, **k: _verify())
+    monkeypatch.setattr(guide, "audit_skipped",
+                        lambda steps, frame: {0: {"status": "not_visible", "why": "lockout not visible"}})
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "watch", "data": FRAME})
+        ws.send_json({"type": "skip"})
+        ws.send_json({"type": "check", "said": "done"})
+        _until(ws, "complete")
+    assert db.session_log(db.list_sessions()[0]["id"])["session"]["outcome"] == "completed_with_skips"
+
+
+def test_out_of_range_reading_becomes_a_fail(monkeypatch):
+    import json
+    from types import SimpleNamespace as NS
+    from backend import guide, meta_client
+    step = {"index": 0, "title": "Check pressure", "instruction": "Read the gauge", "target_phrase": "pressure gauge",
+            "success_criteria": "needle in green band",
+            "reading": {"what": "pressure", "unit": "bar", "min": 6, "max": 8}}
+    resp = NS(output=[meta_client._FunctionCall("verify_step", json.dumps(
+        {"confidence": 0.9, "reason": "needle visible", "say": "Good.", "reading": "9.5 bar"}))],
+        output_text="", backend="hosted")
+    monkeypatch.setattr(meta_client, "reason", lambda *a, **k: resp)
+    out = guide.judge_step(step, b"x", detections=[])
+    assert out["verdict"] == "fail" and "9.5" in out["say"]
+    assert guide.reading_spec(step) == "pressure between 6 and 8 bar"
+
+
+def test_timed_step_waits_without_spending_a_model_call(tmp_path, monkeypatch):
+    from backend import config, db, guide
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr(config, "MEDIA_DIR", tmp_path)
+    monkeypatch.setattr(config, "VOICE", False)
+    monkeypatch.setattr(config, "AUTO_ADVANCE", False)
+    db.init()
+    pid = db.save_procedure("Mix", machine=None, steps=[
+        {"index": 0, "title": "Run mixer", "instruction": "Run the mixer", "target_phrase": "mixer",
+         "success_criteria": "", "check": "timed", "duration_s": 120}])
+    judged = []
+    monkeypatch.setattr(guide, "judge_step", lambda *a, **k: judged.append(1) or _verify())
+    from backend.main import app
+    with TestClient(app).websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "check", "data": FRAME, "said": "done"})
+        assert _until(ws, "verdict")["verdict"] == "wait"    # 120 s timer not up
+        ws.send_json({"type": "abort"})
+    assert not judged
+
+
+def test_confirm_step_advances_on_voice_word(tmp_path, monkeypatch):
+    from backend import config, db, guide
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr(config, "MEDIA_DIR", tmp_path)
+    monkeypatch.setattr(config, "VOICE", False)
+    db.init()
+    pid = db.save_procedure("Click", machine=None, steps=[
+        {"index": 0, "title": "Listen", "instruction": "Listen for the click", "target_phrase": "",
+         "success_criteria": "", "check": "confirm"}])
+
+    def no_vision(*a, **k):
+        raise AssertionError("a confirm step must not call the judge")
+    monkeypatch.setattr(guide, "judge_step", no_vision)
+    from backend.main import app
+    with TestClient(app).websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "check", "data": FRAME, "said": "heard the click"})
+        assert _until(ws, "verdict")["verdict"] == "confirmed"
+        _until(ws, "complete")
+
+
+def test_normalise_keeps_reading_and_timer_fields():
+    out = procedures._normalise({"title": "T", "steps": [
+        {"instruction": "Check the gauge", "target_phrase": "gauge", "check": "reading",
+         "reading": {"what": "pressure", "unit": "bar", "min": "8", "max": 6}},
+        {"instruction": "Mix", "target_phrase": "mixer", "check": "timed", "duration_s": 180},
+        {"instruction": "Weird", "target_phrase": "x", "check": "reading", "reading": None},
+    ]}, n_frames=2)
+    s = out["steps"]
+    assert s[0]["check"] == "reading" and s[0]["reading"]["min"] == 6 and s[0]["reading"]["max"] == 8
+    assert s[1]["check"] == "timed" and s[1]["duration_s"] == 180
+    assert s[2]["check"] == "visual"                          # a reading without a range falls back
+    assert [x["index"] for x in s] == [0, 1, 2]
+
+
+def test_capture_pause_ignores_frames_and_marks_steps(tmp_path, monkeypatch):
+    from backend import config, db
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "c.db")
+    monkeypatch.setattr(config, "VOICE", False)
+    db.init()
+    from backend.main import app
+    with TestClient(app).websocket_connect("/ws/capture") as ws:
+        ws.send_json({"type": "start"})
+        _until(ws, "status")
+        ws.send_json({"type": "pause"})
+        assert _until(ws, "paused")
+        ws.send_json({"type": "frame", "data": FRAME})        # ignored while paused
+        ws.send_json({"type": "resume"})
+        assert _until(ws, "resumed")
+        ws.send_json({"type": "frame", "data": FRAME})
+        assert _until(ws, "frame_ack")["count"] == 1
+        ws.send_json({"type": "mark"})
+        assert _until(ws, "marker")["n"] == 2

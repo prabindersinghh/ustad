@@ -27,7 +27,9 @@ TOOLS: list[dict[str, Any]] = [
         "name": "verify_step",
         "description": (
             "Record that the current step was completed correctly. Call this only "
-            "when the frame and the grounding together show the success criteria met."
+            "when the frame and the grounding together show the success criteria met, "
+            "or when a later step's end state is visible that cannot be reached "
+            "without doing the current step."
         ),
         "parameters": {
             "type": "object",
@@ -44,6 +46,19 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": "Short confirmation to speak to the worker.",
                 },
+                "completed_through": {
+                    "type": "integer",
+                    "description": (
+                        "Only if the worker already went ahead: the highest LATER step "
+                        "number whose success criteria is plainly visible in this frame. "
+                        "Omit when only the current step is done."
+                    ),
+                },
+                "reading": {
+                    "type": "string",
+                    "description": "For a step with a required reading: the value you read off "
+                                   "the gauge or display, with its unit, e.g. '7.2 bar'.",
+                },
             },
             "required": ["confidence", "reason", "say"],
         },
@@ -52,8 +67,8 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "name": "flag_error",
         "description": (
-            "The step was done wrong, or a hazard is visible. Stops the worker "
-            "and tells them how to fix it."
+            "The step was done wrong, a required reading is out of range, or a hazard "
+            "is visible. Stops the worker and tells them how to fix it."
         ),
         "parameters": {
             "type": "object",
@@ -64,6 +79,10 @@ TOOLS: list[dict[str, Any]] = [
                 "say": {
                     "type": "string",
                     "description": "Short spoken correction for the worker.",
+                },
+                "reading": {
+                    "type": "string",
+                    "description": "The value you read, if the step has a required reading.",
                 },
             },
             "required": ["severity", "what_is_wrong", "how_to_fix", "say"],
@@ -91,9 +110,9 @@ SYSTEM = """\
 You are Ustad, verifying one step of a factory procedure from a worker's
 point-of-view camera.
 
-You will be given the step, its visual success criteria, and a grounding
-report from a segmentation model that searched the frame for the step's
-target object.
+You will be given the step, its visual success criteria, a grounding report
+from a segmentation model that searched the frame for the step's target
+object, and the next few steps of the procedure.
 
 You must call exactly one tool. Never reply with prose.
 
@@ -102,11 +121,41 @@ Judge strictly:
     success criteria anyway, call request_better_view -- do not guess.
   * If you can see the step was done, but done wrong, call flag_error.
   * Only call verify_step when the image genuinely shows the criteria met.
+  * Workers sometimes go ahead. If the frame shows the end state of a LATER
+    step, and that state could only be reached by doing the current step,
+    the current step is done: call verify_step and set completed_through to
+    the highest later step whose criteria is plainly visible. Never count a
+    later step whose result cannot be seen in a photo (a lockout done
+    earlier, a timed wait, a sound or smell).
+  * If the step has a required reading, read the gauge or display and put
+    the value in `reading`. A value outside the range is flag_error. If the
+    dial or digits are not legible, request_better_view.
   * Anything unsafe in the frame is flag_error with severity "danger",
     even if the step itself was done correctly.
 Keep every "say" field under 20 words. It is spoken aloud to someone whose
 hands are busy.
 """
+
+
+def reading_spec(step: dict[str, Any]) -> str | None:
+    """'discharge pressure between 6 and 8 bar' for a step that needs a reading."""
+    r = step.get("reading")
+    if not isinstance(r, dict) or (r.get("min") is None and r.get("max") is None):
+        return None
+    what, unit = r.get("what") or "value", r.get("unit") or ""
+    lo, hi = r.get("min"), r.get("max")
+    if lo is not None and hi is not None:
+        return f"{what} between {lo:g} and {hi:g} {unit}".strip()
+    if lo is not None:
+        return f"{what} at least {lo:g} {unit}".strip()
+    return f"{what} at most {hi:g} {unit}".strip()
+
+
+def parse_reading(text: Any) -> float | None:
+    """First number in a reported reading ('7.2 bar' -> 7.2), else None."""
+    import re
+    m = re.search(r"-?\d+(?:\.\d+)?", str(text or ""))
+    return float(m.group(0)) if m else None
 
 
 def ground(step: dict[str, Any], frame: bytes) -> list[sam_parse.Detection]:
@@ -128,8 +177,13 @@ def judge_step(
     worker_said: str | None = None,
     attempt: int = 1,
     detections: list[sam_parse.Detection] | None = None,
+    upcoming: list[dict[str, Any]] | None = None,
+    effort: str | None = None,
 ) -> dict[str, Any]:
     """Perception + decision for one step, with NO persistence.
+
+    `upcoming` (the next few steps) lets the judge notice an operator who went
+    ahead; `effort` picks Muse Spark's reasoning depth for this call.
 
     This is the pure core of the verification loop: SAM grounds the target
     phrase, Muse Spark decides with exactly one tool call, and we map that to a
@@ -149,6 +203,12 @@ def judge_step(
     grounding = sam_parse.summarise(phrase, detections) if phrase else "Grounding: skipped."
 
     # --- decision ---------------------------------------------------------
+    spec = reading_spec(step)
+    later = "".join(
+        f"  Step {u.get('index', 0) + 1}: {u.get('title', '')}. Done when: "
+        f"{u.get('success_criteria') or '(not specified)'}\n"
+        for u in (upcoming or [])
+    )
     prompt = [
         {
             "type": "input_text",
@@ -156,9 +216,11 @@ def judge_step(
                 f"Step {step.get('index', 0) + 1}: {step.get('title', '')}\n"
                 f"Instruction given to the worker: {step.get('instruction', '')}\n"
                 f"Success criteria: {step.get('success_criteria') or '(not specified)'}\n"
-                f"Known common mistake: {step.get('common_mistake') or '(none recorded)'}\n"
+                + (f"Required reading: {spec}\n" if spec else "")
+                + f"Known common mistake: {step.get('common_mistake') or '(none recorded)'}\n"
                 f"Attempt number: {attempt}\n"
                 + (f"The worker said: \"{worker_said}\"\n" if worker_said else "")
+                + (f"\nThe next steps, in case the worker already went ahead:\n{later}" if later else "")
                 + f"\n{grounding}\n\nThe image is the worker's current view."
             ),
         },
@@ -166,7 +228,12 @@ def judge_step(
     ]
 
     backend = meta_client.active_backend()
-    resp = meta_client.reason(SYSTEM, prompt, tools=TOOLS)
+    resp = meta_client.reason(
+        SYSTEM, prompt, tools=TOOLS,
+        effort=effort or config.JUDGE_EFFORT,
+        max_output_tokens=config.JUDGE_MAX_OUTPUT_TOKENS,
+        cache_key="ustad-judge",
+    )
     backend = getattr(resp, "backend", backend)  # may have fallen back
     calls = meta_client.tool_calls(resp)
     latency_ms = int((time.perf_counter() - started) * 1000)
@@ -186,6 +253,24 @@ def judge_step(
             "say": call["args"].get("say", ""),
             "detail": call["args"],
         }
+
+    # A pass with a reading outside the spec is a fail, whatever the model
+    # concluded: the range is the expert's number, not a judgement call.
+    if action["tool"] == "verify_step" and spec:
+        value = parse_reading(action["detail"].get("reading"))
+        lo, hi = step["reading"].get("min"), step["reading"].get("max")
+        if value is not None and ((lo is not None and value < lo) or (hi is not None and value > hi)):
+            unit = step["reading"].get("unit", "")
+            action = {
+                "tool": "flag_error",
+                "say": f"Reading is {value:g} {unit}. It must be {spec}.",
+                "detail": {
+                    "severity": "major", "reading": action["detail"].get("reading"),
+                    "what_is_wrong": f"{step['reading'].get('what', 'Reading')} is {value:g} {unit}, outside {spec}",
+                    "how_to_fix": "Adjust until the reading is in range, then say done.",
+                    "say": f"Reading is {value:g} {unit}. It must be {spec}.",
+                },
+            }
 
     verdict = {
         "verify_step": "pass",
@@ -211,11 +296,46 @@ def verify_step(
     worker_said: str | None = None,
     attempt: int = 1,
     detections: list[sam_parse.Detection] | None = None,
+    upcoming: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one perception -> decision -> action cycle. Returns the action taken."""
     action = judge_step(step, frame, worker_said=worker_said, attempt=attempt,
-                        detections=detections)
+                        detections=detections, upcoming=upcoming)
     return record(session_id=session_id, step=step, frame=frame, action=action, attempt=attempt)
+
+
+AUDIT_SYSTEM = """\
+You are Ustad, auditing the finished state of a factory job. The worker
+skipped some steps. Looking only at this final photo, decide for each skipped
+step whether its success criteria is visibly satisfied now.
+
+Return JSON: {"steps": [{"step": <number>, "status": "satisfied" | "not_satisfied"
+| "not_visible", "why": "<one short sentence>"}]}
+
+"not_visible" is for anything a photo cannot show (a lockout earlier in the
+job, a timed wait, a sound). Never mark it satisfied.
+"""
+
+
+def audit_skipped(skipped: list[dict[str, Any]], frame: bytes) -> dict[int, dict[str, str]]:
+    """One look at the finished state for every skipped step. {index: {status, why}}."""
+    listing = "\n".join(
+        f"Step {s.get('index', 0) + 1}: {s.get('title', '')}. Done when: "
+        f"{s.get('success_criteria') or '(not specified)'}" for s in skipped
+    )
+    data = meta_client.reason_json(
+        AUDIT_SYSTEM,
+        [{"type": "input_text", "text": f"Skipped steps:\n{listing}\n\nThe image is the final state."},
+         meta_client.as_image_part(frame)],
+        effort=config.JUDGE_EFFORT,
+    )
+    out: dict[int, dict[str, str]] = {}
+    for row in (data or {}).get("steps", []) if isinstance(data, dict) else []:
+        try:
+            out[int(row["step"]) - 1] = {"status": str(row.get("status", "")), "why": str(row.get("why", ""))}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def record(
@@ -258,7 +378,7 @@ def record(
     )
 
     # judge_step already set verdict, latency_ms, grounding, detections, backend.
-    action.update(advance=(verdict == "pass"), evidence_path=evidence_path)
+    action.update(advance=(verdict in ("pass", "confirmed")), evidence_path=evidence_path)
     log.info("step %s attempt %s -> %s in %dms on %s backend%s",
              step.get("index"), attempt, verdict, action["latency_ms"], action["backend"],
              f" ({source})" if source else "")

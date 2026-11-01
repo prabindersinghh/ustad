@@ -53,6 +53,14 @@ Produce a JSON object:
                             ('cap seated flush, no gap visible').>",
       "keyframe_index": <integer: the keyframe that best shows this step's
                         target object, used to verify the target_phrase>,
+      "check": "<how the step is verified: 'visual' (default: the camera can
+                see it done), 'reading' (a gauge, display or scale must show
+                a value), 'timed' (something must run or wait for a time), or
+                'confirm' (the result cannot be seen in a photo: a click, a
+                sound, a smell)>",
+      "reading": {"what": "<e.g. discharge pressure>", "unit": "<e.g. bar>",
+                  "min": <number or null>, "max": <number or null>} or null,
+      "duration_s": <seconds to run or wait, for a 'timed' step, else null>,
       "common_mistake": "<the most likely error, or null>",
       "hazard": "<safety warning to speak before the step, or null>"
     }
@@ -68,6 +76,16 @@ Rules:
     Prefer a distinguishing adjective ('left pressure gauge', not 'gauge').
   * success_criteria must be something a camera could confirm by looking.
   * keyframe_index must be a valid index into the keyframes you were given.
+  * Industrial machines: when the expert names an acceptable value or range
+    for a gauge, display, scale or meter ("pressure should sit between 6 and
+    8 bar", "weigh out 25 kilos"), make it a 'reading' step with that range;
+    use the gauge or display itself as the target_phrase. When they say to
+    run, mix, heat or wait for a time, make it 'timed' with duration_s. Use
+    'confirm' only when a camera truly cannot verify the result.
+  * Keep lockout, isolation and other safety steps as their own steps, with
+    the hazard filled in; never merge them into a neighbouring step.
+  * If the narration contains "[step marker]", the expert marked the start of
+    a new step there: begin a new step at that point.
   * If the expert mentions a torque, pressure, count or setting, put the exact
     value in the instruction.
   * Write instruction, success_criteria and hazard in the same language as the
@@ -248,6 +266,8 @@ def _check_grounding(
 
     def one(step: dict[str, Any]) -> bool:
         """True when the step fails grounding."""
+        if step.get("check") == "confirm":
+            return False                      # not visually checkable by design
         phrase = (step.get("target_phrase") or "").strip()
         if not phrase:
             return True
@@ -267,6 +287,24 @@ def _check_grounding(
 
 # --------------------------------------------------------------------------
 
+def _clean_reading(r: Any) -> dict[str, Any] | None:
+    """{'what','unit','min','max'} with numeric bounds, or None if unusable."""
+    if not isinstance(r, dict):
+        return None
+    def num(v):
+        try:
+            return float(v) if v is not None and str(v).strip() != "" else None
+        except (TypeError, ValueError):
+            return None
+    lo, hi = num(r.get("min")), num(r.get("max"))
+    if lo is None and hi is None:
+        return None
+    if lo is not None and hi is not None and lo > hi:
+        lo, hi = hi, lo
+    return {"what": str(r.get("what") or "reading").strip(), "unit": str(r.get("unit") or "").strip(),
+            "min": lo, "max": hi}
+
+
 def _normalise(data: Any, *, n_frames: int = 0) -> dict[str, Any]:
     """Defend against shape drift from the model."""
     if isinstance(data, list):
@@ -285,14 +323,27 @@ def _normalise(data: Any, *, n_frames: int = 0) -> dict[str, Any]:
         ki = raw.get("keyframe_index")
         if not isinstance(ki, int) or (n_frames and not (0 <= ki < n_frames)):
             ki = min(i, n_frames - 1) if n_frames else 0
+        check = str(raw.get("check") or "visual").lower()
+        if check not in ("visual", "reading", "timed", "confirm"):
+            check = "visual"
+        reading = _clean_reading(raw.get("reading"))
+        if check == "reading" and not reading:
+            check = "visual"                      # a reading step needs a range to check against
+        duration = raw.get("duration_s")
+        duration = int(duration) if isinstance(duration, (int, float)) and 0 < duration <= 4 * 3600 else None
+        if check == "timed" and not duration:
+            check = "visual"
         steps.append(
             {
-                "index": i,
+                "index": len(steps),
                 "title": (raw.get("title") or f"Step {i + 1}").strip(),
                 "instruction": instruction,
                 "target_phrase": (raw.get("target_phrase") or "").strip(),
                 "success_criteria": (raw.get("success_criteria") or "").strip(),
                 "keyframe_index": ki,
+                "check": check,
+                "reading": reading if check == "reading" else None,
+                "duration_s": duration if check == "timed" else None,
                 "common_mistake": raw.get("common_mistake") or None,
                 "hazard": raw.get("hazard") or None,
             }

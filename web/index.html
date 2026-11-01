@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=12" />
+<link rel="stylesheet" href="app.css?v=13" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -378,13 +378,23 @@
     <video id="cap-video" playsinline muted autoplay></video>
     <div class="overlay-top">
       <button class="back" data-go="home">&larr;</button>
-      <span id="cap-badge" class="badge">ready</span>
+      <div id="cap-clock" class="rec-clock" aria-live="off">
+        <i></i><b id="cap-time">0:00</b><span id="cap-state">ready</span>
+        <div class="level" aria-hidden="true"><span id="cap-level"></span></div>
+      </div>
+      <span id="cap-badge" class="badge">0 frames</span>
     </div>
+    <div class="rec-limit" aria-hidden="true"><span id="cap-limit"></span></div>
+    <div id="cap-count" class="countdown" aria-live="assertive"></div>
     <div class="overlay-bottom">
       <div id="cap-drafts" class="drafts" aria-live="polite"></div>
       <p id="cap-heard" class="heard"></p>
-      <p id="cap-status" class="status-line">Describe each step out loud as you do it.</p>
-      <button id="cap-btn" class="cockpit-primary">Start recording</button>
+      <p id="cap-status" class="status-line">Aim for 1 to 5 minutes. Say each step out loud as you do it, or tap Mark step between steps.</p>
+      <div class="cap-controls">
+        <button id="cap-mark" class="ghost" hidden>Mark step</button>
+        <button id="cap-btn" class="cockpit-primary">Start recording</button>
+        <button id="cap-pause" class="ghost" hidden>Pause</button>
+      </div>
     </div>
   </div>
 </section>
@@ -415,6 +425,7 @@
       <p id="guide-heard" class="heard"></p>
       <p id="guide-step-title" class="step-title"></p>
       <p id="guide-instruction" class="instruction">Starting…</p>
+      <div id="guide-spec" class="step-spec" hidden></div>
       <div id="guide-hints" class="hints">Say <b>done</b> <b>repeat</b> <b>what's wrong</b> <b>where</b></div>
       <div class="guide-controls">
         <button id="guide-repeat" class="ghost">Repeat</button>
@@ -434,6 +445,6 @@
   <div id="report-body" class="list"></div>
 </section>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

@@ -337,6 +337,35 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .hazard::before { content: "Unsafe  "; font-weight: 800; }
 .hazard.on { opacity: 1; transform: none; }
 
+/* capture: the job clock, so the expert always knows where they are */
+.rec-clock { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px 7px 10px; border-radius: 999px; background: rgba(10,16,32,.6); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.14); color: #fff; }
+.rec-clock i { width: 10px; height: 10px; border-radius: 50%; background: #8fa3c4; }
+.rec-clock b { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; min-width: 3.1ch; }
+.rec-clock span { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.7); }
+.rec-clock.recording i { background: #ff4d52; animation: blink 1.2s ease-in-out infinite; }
+.rec-clock.paused { background: rgba(232,144,10,.35); border-color: rgba(255,197,107,.6); }
+.rec-clock.paused i { background: #ffb020; }
+.rec-clock.building i { background: #3b82ff; animation: blink .6s ease-in-out infinite; }
+.rec-clock.saved i { background: #12d98a; }
+.level { width: 34px; height: 6px; border-radius: 99px; background: rgba(255,255,255,.18); overflow: hidden; }
+.level span { display: block; height: 100%; width: 0; background: #12d98a; transition: width .1s linear; }
+.rec-limit { position: absolute; left: 0; right: 0; top: calc(var(--safe-t) + 62px); z-index: 3; height: 3px; background: rgba(255,255,255,.12); }
+.rec-limit span { display: block; height: 100%; width: 0; background: #3b82ff; transition: width .25s linear; }
+.rec-limit span.warn { background: #ffb020; }
+.countdown { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; font-size: 120px; font-weight: 800; color: #fff; text-shadow: 0 8px 40px rgba(0,0,0,.5); background: rgba(10,16,32,.35); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.countdown.on { opacity: 1; }
+.cap-controls { display: flex; gap: 10px; }
+.cap-controls .cockpit-primary { flex: 1; }
+.cap-controls .ghost[hidden] { display: none; }
+.marker { align-self: center; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: rgba(26,86,224,.75); animation: rise .35s cubic-bezier(.2,.8,.2,1); }
+
+/* guide: what kind of check this step is */
+.step-spec { display: inline-block; margin: -8px 0 14px; padding: 7px 12px; border-radius: 10px; font-size: 14px; font-weight: 700; color: #fff; background: rgba(26,86,224,.55); border: 1px solid rgba(143,178,255,.5); }
+.step-spec[hidden] { display: none; }
+.step-spec.timed { font-variant-numeric: tabular-nums; background: rgba(232,144,10,.4); border-color: rgba(255,197,107,.6); }
+.step-spec.timed.up { background: rgba(18,160,106,.5); border-color: rgba(18,217,138,.7); }
+.step-spec.confirm { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.25); font-weight: 600; }
+
 /* capture: steps forming as the expert talks */
 .drafts { display: flex; flex-direction: column; gap: 8px; max-height: 34vh; overflow-y: auto; margin-bottom: 12px; scrollbar-width: none; mask-image: linear-gradient(transparent, #000 18px); -webkit-mask-image: linear-gradient(transparent, #000 18px); }
 .drafts::-webkit-scrollbar { display: none; }
