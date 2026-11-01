@@ -82,6 +82,17 @@
   .muted{color:var(--muted)}
   .hint{font-size:14px;color:var(--muted);padding:12px 2px}
   code{color:var(--blue-600);font-weight:600}
+  .spend{margin-bottom:26px}
+  .spend-body{padding:16px 20px 18px}
+  .spend-top{font-size:14px;color:var(--ink-soft);margin-bottom:10px}
+  .spend-top b{font-size:22px;color:var(--ink);font-variant-numeric:tabular-nums;margin-right:4px}
+  .bar{height:8px;border-radius:99px;background:var(--cloud);overflow:hidden}
+  .bar span{display:block;height:100%;border-radius:99px;background:var(--ok)}
+  .bar span.warn{background:var(--warn)} .bar span.bad{background:var(--bad)}
+  table.usage{width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px}
+  table.usage th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+  table.usage td{padding:7px 8px;border-bottom:1px solid var(--line)}
+  table.usage .num{text-align:right;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -92,6 +103,7 @@
 
 <div class="wrap">
   <div class="kpis" id="kpis"></div>
+  <section class="panel spend" id="spend"></section>
 
   <div class="cols">
     <section class="panel">
@@ -128,6 +140,25 @@ function kpi(v, l, sub, cls){
   return `<div class="kpi"><div class="v ${cls||''}">${v}</div><div class="l">${l}</div>`
        + (sub?`<div class="sub">${sub}</div>`:'')+`</div>`;
 }
+/* ---- spend against the API budget (metered at list price, per call) ---- */
+function loadSpend(){
+  getJSON('/api/usage').then((u)=>{
+    const pct = Math.min(100, (u.total_usd / u.budget_usd) * 100);
+    const tone = pct >= 90 ? 'bad' : pct >= 60 ? 'warn' : 'ok';
+    const rows = u.by_model.map((r)=>`<tr><td>${esc(r.model)}</td><td>${esc(r.kind)}</td>
+      <td class="num">${r.calls}</td><td class="num">${r.units}</td><td class="num">$${r.cost.toFixed(4)}</td></tr>`).join('');
+    $('spend').innerHTML = `<h2>API spend <span class="count">metered at list price</span></h2>
+      <div class="spend-body">
+        <div class="spend-top"><b>$${u.total_usd.toFixed(2)}</b> of $${u.budget_usd.toFixed(0)} budget
+          <span class="muted">· $${u.last_hour_usd.toFixed(2)} in the last hour · $${u.remaining_usd.toFixed(2)} left</span></div>
+        <div class="bar"><span class="${tone}" style="width:${pct.toFixed(1)}%"></span></div>
+        ${rows ? `<table class="usage"><thead><tr><th>Model</th><th>Billed as</th><th class="num">Calls</th><th class="num">Units</th><th class="num">Cost</th></tr></thead><tbody>${rows}</tbody></table>`
+               : '<p class="muted">No metered calls yet.</p>'}
+      </div>`;
+  }).catch(()=>{ $('spend').innerHTML = ''; });
+}
+loadSpend(); setInterval(loadSpend, 15000);
+
 getJSON('/api/metrics').then((m)=>{
   const checks = m.checks||0;
   const passRate = m.pass_rate!=null ? Math.round(m.pass_rate*100)+'%' : 'n/a';

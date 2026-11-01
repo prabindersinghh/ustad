@@ -31,6 +31,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     outcome       TEXT
 );
 
+CREATE TABLE IF NOT EXISTS usage (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    at      REAL NOT NULL,
+    model   TEXT NOT NULL,
+    kind    TEXT NOT NULL,
+    units   REAL NOT NULL,
+    cost    REAL NOT NULL,
+    note    TEXT
+);
+
 CREATE TABLE IF NOT EXISTS step_events (
     id           TEXT PRIMARY KEY,
     session_id   TEXT NOT NULL,
@@ -190,6 +200,47 @@ def list_sessions(limit: int = 50) -> list[dict[str, Any]]:
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------- usage
+
+def log_usage(model: str, kind: str, units: float, cost: float, note: str | None = None) -> None:
+    """One billed API call (or a batch of audio seconds) and what it cost in USD."""
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO usage (at, model, kind, units, cost, note) VALUES (?,?,?,?,?,?)",
+            (time.time(), model, kind, units, cost, note),
+        )
+
+
+def usage_total() -> float:
+    with connect() as conn:
+        row = conn.execute("SELECT COALESCE(SUM(cost), 0) FROM usage").fetchone()
+    return float(row[0] or 0)
+
+
+def usage_summary() -> dict[str, Any]:
+    """Spend so far, by model, plus the last hour, for the dashboard meter."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT model, kind, COUNT(*) AS calls, SUM(units) AS units, SUM(cost) AS cost"
+            " FROM usage GROUP BY model, kind ORDER BY cost DESC"
+        ).fetchall()
+        hour = conn.execute(
+            "SELECT COALESCE(SUM(cost),0) FROM usage WHERE at > ?", (time.time() - 3600,)
+        ).fetchone()[0]
+    by = [dict(r) for r in rows]
+    for r in by:
+        r["cost"] = round(r["cost"] or 0, 4)
+        r["units"] = round(r["units"] or 0, 2)
+    total = round(sum(r["cost"] for r in by), 4)
+    return {
+        "total_usd": total,
+        "last_hour_usd": round(float(hour or 0), 4),
+        "budget_usd": config.BUDGET_USD,
+        "remaining_usd": round(config.BUDGET_USD - total, 4),
+        "by_model": by,
+    }
 
 
 def metrics() -> dict[str, Any]:

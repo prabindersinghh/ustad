@@ -97,6 +97,7 @@ def build_procedure(
     *,
     hint: str | None = None,
     validate: bool | None = None,
+    frame_times: list[float] | None = None,
 ) -> dict[str, Any]:
     """Expert recording -> procedure dict. Does not persist.
 
@@ -104,22 +105,45 @@ def build_procedure(
     target_phrase is grounded against its keyframe with SAM, and any phrase that
     cannot be found is regenerated once. A `_validation` block is attached to the
     returned dict so the UI and eval harness can see what the self-check did.
+
+    `frame_times` (seconds from the start, one per keyframe) lets the writer line
+    timestamped narration up with what the camera showed at that moment.
     """
     if validate is None:
         validate = config.VALIDATE_PROCEDURE
 
-    frames = keyframes[: config.MAX_KEYFRAMES_FOR_PROCEDURE]
-    log.info("Building procedure from %d keyframes, %d chars of narration",
-             len(frames), len(transcript))
+    keep = select_keyframes(len(keyframes), config.MAX_KEYFRAMES_FOR_PROCEDURE)
+    frames = [keyframes[i] for i in keep]
+    times = [frame_times[i] for i in keep] if frame_times and len(frame_times) == len(keyframes) else None
+    log.info("Building procedure from %d of %d keyframes, %d chars of narration",
+             len(frames), len(keyframes), len(transcript))
 
-    proc = _generate(transcript, frames, hint=hint)
+    proc = _generate(transcript, frames, hint=hint, times=times)
 
     if validate and frames:
         try:
-            proc = _validate_and_repair(proc, frames, transcript, hint=hint)
+            proc = _validate_and_repair(proc, frames, transcript, hint=hint, times=times)
         except Exception:  # noqa: BLE001 - validation is best-effort, never fatal
             log.exception("Procedure self-check failed; returning unvalidated procedure")
     return proc
+
+
+def select_keyframes(n: int, limit: int) -> list[int]:
+    """Evenly spaced indices across the whole recording, always first and last.
+
+    Taking the first `limit` frames silently dropped the end of every long job,
+    which is usually the part that matters most.
+    """
+    if n <= limit:
+        return list(range(n))
+    if limit <= 1:
+        return [n - 1]
+    return sorted({round(i * (n - 1) / (limit - 1)) for i in range(limit)})
+
+
+def _mmss(seconds: float) -> str:
+    s = int(seconds)
+    return f"{s // 60}:{s % 60:02d}"
 
 
 def _generate(
@@ -128,7 +152,13 @@ def _generate(
     *,
     hint: str | None,
     extra_system: str = "",
+    times: list[float] | None = None,
 ) -> dict[str, Any]:
+    when = (
+        "\nKeyframe capture times: "
+        + ", ".join(f"{i} at {_mmss(t)}" for i, t in enumerate(times)) + "."
+        if times else ""
+    )
     content: list[dict[str, Any]] = [
         {
             "type": "input_text",
@@ -136,7 +166,7 @@ def _generate(
                 (f"Context from the supervisor: {hint}\n\n" if hint else "")
                 + f"Expert narration (transcribed):\n{transcript or '(no speech captured)'}"
                 + f"\n\nThe {len(frames)} images that follow are keyframes in "
-                + "chronological order, indexed from 0."
+                + "chronological order, indexed from 0." + when
             ),
         }
     ]
@@ -158,6 +188,7 @@ def _validate_and_repair(
     hint: str | None,
     segment_fn: Callable[[str, bytes], list[Any]] | None = None,
     generate_fn: Callable[..., dict[str, Any]] | None = None,
+    times: list[float] | None = None,
 ) -> dict[str, Any]:
     """Ground every target_phrase; regenerate the failures once.
 
@@ -166,7 +197,7 @@ def _validate_and_repair(
     """
     segment_fn = segment_fn or meta_client.segment
     generate_fn = generate_fn or (
-        lambda: _generate(transcript, frames, hint=hint,
+        lambda: _generate(transcript, frames, hint=hint, times=times,
                           extra_system=REPAIR_SUFFIX.format(failures=failures_block))
     )
 
@@ -208,24 +239,30 @@ def _check_grounding(
     frames: list[bytes],
     segment_fn: Callable[[str, bytes], list[Any]],
 ) -> list[dict[str, Any]]:
-    """Return the steps whose target_phrase SAM cannot find in its keyframe."""
-    failures: list[dict[str, Any]] = []
-    for step in steps:
+    """Return the steps whose target_phrase SAM cannot find in its keyframe.
+
+    The checks are independent, so they run in parallel: one SAM round-trip of
+    wall time instead of one per step.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(step: dict[str, Any]) -> bool:
+        """True when the step fails grounding."""
         phrase = (step.get("target_phrase") or "").strip()
         if not phrase:
-            failures.append(step)
-            continue
+            return True
         ki = step.get("keyframe_index")
         if not isinstance(ki, int) or not (0 <= ki < len(frames)):
             ki = min(step.get("index", 0), len(frames) - 1)
         try:
-            dets = segment_fn(phrase, frames[ki])
+            return not segment_fn(phrase, frames[ki])
         except Exception as exc:  # noqa: BLE001 - a SAM error is not a bad phrase
             log.warning("Grounding check errored for %r: %s", phrase, exc)
-            continue
-        if not dets:
-            failures.append(step)
-    return failures
+            return False
+
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(steps)))) as pool:
+        failed = list(pool.map(one, steps))
+    return [s for s, bad in zip(steps, failed) if bad]
 
 
 # --------------------------------------------------------------------------

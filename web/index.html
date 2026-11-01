@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=7" />
+<link rel="stylesheet" href="app.css?v=9" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -352,6 +352,8 @@
       <span id="cap-badge" class="badge">ready</span>
     </div>
     <div class="overlay-bottom">
+      <div id="cap-drafts" class="drafts" aria-live="polite"></div>
+      <p id="cap-heard" class="heard"></p>
       <p id="cap-status" class="status-line">Describe each step out loud as you do it.</p>
       <button id="cap-btn" class="cockpit-primary">Start recording</button>
     </div>
@@ -374,12 +376,17 @@
     <canvas id="guide-overlay"></canvas>
     <div class="overlay-top">
       <button class="back" data-go="home">&larr;</button>
+      <span id="guide-live" class="live-chip connecting"><i></i><b>Connecting</b></span>
       <span id="guide-progress" class="badge">step</span>
     </div>
+    <div id="guide-hazard" class="hazard" role="alert"></div>
+    <div id="guide-toast" class="toast"></div>
     <div id="verdict-flash" class="verdict-flash"></div>
     <div class="overlay-bottom">
+      <p id="guide-heard" class="heard"></p>
       <p id="guide-step-title" class="step-title"></p>
       <p id="guide-instruction" class="instruction">Starting…</p>
+      <div id="guide-hints" class="hints">Say <b>done</b> <b>repeat</b> <b>what's wrong</b> <b>where</b></div>
       <div class="guide-controls">
         <button id="guide-repeat" class="ghost">Repeat</button>
         <button id="guide-done" class="cockpit-primary">Done. Check it</button>
@@ -398,6 +405,6 @@
   <div id="report-body" class="list"></div>
 </section>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

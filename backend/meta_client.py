@@ -108,8 +108,29 @@ def segment(phrase: str, image: str | bytes) -> list[sam_parse.Detection]:
     )
     raw = getattr(resp, "output_text", "") or ""
     detections = sam_parse.parse(raw)
+    _meter(config.SAM_MODEL, "image", 1, config.PRICE_SAM_IMAGE)
     log.info("SAM %r -> %d detections", phrase, len(detections))
     return detections
+
+
+def _meter(model: str, kind: str, units: float, cost: float, note: str | None = None) -> None:
+    """Record a billed call. Metering must never break a request."""
+    try:
+        from . import db
+        db.log_usage(model, kind, units, cost, note)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("usage meter failed: %s", exc)
+
+
+def _meter_tokens(model: str, usage: Any) -> None:
+    """Exact Spark cost from the token counts the API returns, reasoning included."""
+    if usage is None:
+        return
+    cached = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", 0) or 0
+    inp = (getattr(usage, "input_tokens", 0) or 0) - cached
+    out = getattr(usage, "output_tokens", 0) or 0
+    cost = inp * config.PRICE_SPARK_IN + cached * config.PRICE_SPARK_CACHED + out * config.PRICE_SPARK_OUT
+    _meter(model, "tokens", inp + cached + out, cost, f"in={inp} cached={cached} out={out}")
 
 
 # --------------------------------------------------------------------------
@@ -164,6 +185,7 @@ def reason(
     if tools:
         kwargs["tools"] = tools
     resp = client().responses.create(**kwargs)
+    _meter_tokens(kwargs["model"], getattr(resp, "usage", None))
     try:
         resp.backend = "hosted"  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001 - pydantic models may be frozen
@@ -226,6 +248,9 @@ def _reason_open(
         kwargs["tool_choice"] = "required"
 
     completion = open_client().chat.completions.create(**kwargs)
+    u = getattr(completion, "usage", None)
+    if u is not None:   # self-hosted: tracked for volume, billed by the GPU host not per token
+        _meter(config.OPEN_MODEL, "tokens", (u.prompt_tokens or 0) + (u.completion_tokens or 0), 0.0, "open weights")
     message = completion.choices[0].message
 
     calls: list[Any] = []
@@ -330,6 +355,8 @@ def transcribe(
     if r.status_code >= 400:
         raise RuntimeError(f"ASR {r.status_code}: {r.text[:300]}")
     payload = r.json()
+    secs = int((payload.get("audioDurationMs") or 0) / 1000)   # billed in whole seconds
+    _meter(config.ASR_MODEL, "audio_s", secs, secs * config.PRICE_ASR_SECOND, "batch")
     log.info("ASR %d ms of audio -> %d turns", payload.get("audioDurationMs", 0), len(payload.get("turns") or []))
     return (payload.get("transcript") or "").strip()
 

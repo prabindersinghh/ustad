@@ -9,7 +9,6 @@ phone for Ray-Ban Meta glasses later without touching this file.
 """
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import logging
@@ -23,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, guide, meta_client, procedures
+from . import config, db, live, meta_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,6 +106,12 @@ def api_metrics() -> dict[str, Any]:
     return db.metrics()
 
 
+@app.get("/api/usage")
+def api_usage() -> dict[str, Any]:
+    """Metered spend at list price, by model, against BUDGET_USD."""
+    return db.usage_summary()
+
+
 @app.get("/dashboard")
 def dashboard() -> FileResponse:
     """Supervisor view: procedures, session log with evidence photos, metrics."""
@@ -124,257 +129,60 @@ def media(name: str) -> FileResponse:
     return FileResponse(path)
 
 
-# ---------------------------------------------------------------- capture
+# ------------------------------------------------------------- live sockets
+# Both sockets carry JSON text frames plus binary frames of 16 kHz mono PCM
+# (the phone's microphone, relayed to Muse Voice). The protocol lives in
+# backend/live.py.
+
+async def _pump(ws: WebSocket, session) -> None:
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
+            if msg.get("bytes"):
+                await session.on_audio(msg["bytes"])
+            elif msg.get("text"):
+                if not await session.on_text(json.loads(msg["text"])):
+                    break
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001
+        log.exception("socket error")
+    finally:
+        await session.close()
+
 
 @app.websocket("/ws/capture")
 async def ws_capture(ws: WebSocket) -> None:
-    """Expert records once; we return a reusable procedure.
+    """Expert records once; narration streams live; we return a procedure.
 
-    Protocol (JSON text frames):
-      -> {"type":"start","hint":"optional context"}
-      -> {"type":"frame","data":"<data url>"}            (repeatedly)
-      -> {"type":"audio","data":"<base64>","mime":"audio/mp4"}
-      -> {"type":"stop"}
-      <- {"type":"status","message":"..."}
-      <- {"type":"procedure","procedure_id":"...","procedure":{...}}
+      -> {"type":"start","hint":"..."}  {"type":"frame","data":"<jpeg data url>"}
+      -> binary PCM (narration)          {"type":"stop"}
+      <- {"type":"heard","text":"...","final":bool}   live captions
+      <- {"type":"draft","n":N,"text":"...","at":"0:07"}  a step forming
+      <- {"type":"draft_title","n":N,"title":"..."}
+      <- {"type":"status"|"frame_ack"|"error"|"procedure", ...}
     """
     await ws.accept()
-    keyframes: list[bytes] = []
-    audio_blobs: list[bytes] = []
-    audio_mime = "audio/mp4"
-    hint: str | None = None
+    await _pump(ws, live.CaptureSession(ws))
+    log.info("capture socket closed")
 
-    async def status(message: str) -> None:
-        await ws.send_json({"type": "status", "message": message})
-
-    try:
-        while True:
-            msg = json.loads(await ws.receive_text())
-            kind = msg.get("type")
-
-            if kind == "start":
-                hint = msg.get("hint") or None
-                keyframes.clear()
-                audio_blobs.clear()
-                await status("Recording. Narrate each step as you do it.")
-
-            elif kind == "frame":
-                keyframes.append(_decode_frame(msg["data"]))
-                await ws.send_json({"type": "frame_ack", "count": len(keyframes)})
-
-            elif kind == "audio":
-                audio_blobs.append(base64.b64decode(msg["data"]))
-                audio_mime = msg.get("mime", audio_mime)
-
-            elif kind == "stop":
-                audio_size = sum(len(b) for b in audio_blobs)
-                log.info("capture stop: %d keyframes, %d bytes of %s audio",
-                         len(keyframes), audio_size, audio_mime)
-                if not keyframes:
-                    await ws.send_json({
-                        "type": "error",
-                        "message": "No camera frames reached the server. Keep recording "
-                                   "for a few seconds with the camera on the work, then stop.",
-                    })
-                    continue
-
-                await status(f"Captured {len(keyframes)} keyframes. Transcribing…")
-                transcript = ""
-                if audio_blobs:
-                    ext = "m4a" if "mp4" in audio_mime or "m4a" in audio_mime else "webm"
-                    try:
-                        # Model calls block for seconds; run them off the event
-                        # loop so the socket keeps answering pings and stays up.
-                        transcript = await asyncio.to_thread(
-                            meta_client.transcribe, b"".join(audio_blobs), filename=f"capture.{ext}"
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        log.exception("Transcription failed")
-                        await status("Couldn't transcribe the narration; writing from the video alone.")
-
-                await status("Writing the procedure…")
-                try:
-                    proc = await asyncio.to_thread(
-                        procedures.build_procedure, transcript, keyframes, hint=hint
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    log.exception("Procedure generation failed")
-                    await ws.send_json({"type": "error", "message": str(exc)})
-                    continue
-
-                pid = db.save_procedure(
-                    proc["title"],
-                    proc["steps"],
-                    machine=proc.get("machine"),
-                    transcript=transcript,
-                )
-                await ws.send_json(
-                    {"type": "procedure", "procedure_id": pid, "procedure": proc}
-                )
-
-            elif kind == "close":
-                break
-
-    except WebSocketDisconnect:
-        log.info("capture socket closed")
-    except Exception:  # noqa: BLE001
-        log.exception("capture socket error")
-
-
-# ------------------------------------------------------------------ guide
 
 @app.websocket("/ws/guide")
 async def ws_guide(ws: WebSocket) -> None:
-    """Worker follows a procedure; every step is checked before advancing.
+    """Worker follows a procedure live; every step is checked before advancing.
 
-    Protocol (JSON text frames):
-      -> {"type":"start","procedure_id":"...","worker":"name"}
-      -> {"type":"check","data":"<data url>","said":"done"}
-      -> {"type":"repeat"}
-      -> {"type":"skip"}            (supervisor override, logged)
-      <- {"type":"speak","text":"...","step":N,"of":M}
-      <- {"type":"verdict", ...}
-      <- {"type":"complete","session_id":"..."}
+      -> {"type":"start","procedure_id":"..."} | {"type":"resume","session_id":"..."}
+      -> {"type":"watch","data":"<jpeg>"}  the live view, about once a second
+      -> binary PCM (voice commands)       {"type":"check"} {"type":"repeat"|"skip"|"abort"}
+      <- {"type":"track","detections":[...]}   live grounding for the AR box
+      <- {"type":"heard"|"checking"|"auto"|"hazard"|"pulse", ...}
+      <- {"type":"speak"|"verdict"|"session"|"complete"|"error", ...}
     """
     await ws.accept()
-    proc: dict[str, Any] | None = None
-    session_id: str | None = None
-    idx = 0
-    attempt = 1
-
-    async def speak(text: str, **extra: Any) -> None:
-        await ws.send_json({"type": "speak", "text": text, **extra})
-
-    async def announce_step() -> None:
-        assert proc is not None
-        step = proc["steps"][idx]
-        prefix = f"Warning. {step['hazard']} " if step.get("hazard") else ""
-        await speak(
-            prefix + step["instruction"],
-            step=idx + 1,
-            of=len(proc["steps"]),
-            title=step.get("title", ""),
-            target=step.get("target_phrase", ""),
-        )
-
-    try:
-        while True:
-            msg = json.loads(await ws.receive_text())
-            kind = msg.get("type")
-
-            if kind == "start":
-                proc = db.get_procedure(msg["procedure_id"])
-                if not proc:
-                    await ws.send_json({"type": "error", "message": "Unknown procedure"})
-                    continue
-                session_id = db.start_session(proc["id"], msg.get("worker"), "guide")
-                idx, attempt = 0, 1
-                await ws.send_json(
-                    {
-                        "type": "session",
-                        "session_id": session_id,
-                        "title": proc["title"],
-                        "steps": len(proc["steps"]),
-                    }
-                )
-                await announce_step()
-
-            elif kind == "resume":
-                # Reconnect after a dropped socket. The server, not the client,
-                # decides where the worker is: resume just past the last step
-                # that passed, so a lost connection never restarts the job.
-                sid = msg.get("session_id")
-                record = db.session_log(sid) if sid else {"session": None}
-                if not record["session"]:
-                    await ws.send_json({"type": "error", "message": "Unknown session"})
-                    continue
-                proc = db.get_procedure(record["session"]["procedure_id"])
-                if not proc:
-                    await ws.send_json({"type": "error", "message": "Unknown procedure"})
-                    continue
-                session_id = sid
-                passed = [e["step_index"] for e in record["events"] if e["verdict"] == "pass"]
-                idx = (max(passed) + 1) if passed else 0
-                attempt = 1
-                if idx >= len(proc["steps"]):
-                    await ws.send_json({"type": "complete", "session_id": session_id})
-                    continue
-                await ws.send_json(
-                    {
-                        "type": "session",
-                        "session_id": session_id,
-                        "title": proc["title"],
-                        "steps": len(proc["steps"]),
-                        "resumed_at": idx + 1,
-                    }
-                )
-                await announce_step()
-
-            elif kind == "check":
-                if proc is None or session_id is None:
-                    await ws.send_json({"type": "error", "message": "Session not started"})
-                    continue
-
-                frame = _decode_frame(msg["data"])
-                try:
-                    action = await asyncio.to_thread(
-                        guide.verify_step,
-                        session_id=session_id,
-                        step=proc["steps"][idx],
-                        frame=frame,
-                        worker_said=msg.get("said"),
-                        attempt=attempt,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    log.exception("verification failed")
-                    await ws.send_json({"type": "error", "message": str(exc)})
-                    continue
-
-                await ws.send_json({"type": "verdict", **action, "step": idx + 1})
-                if action["say"]:
-                    await speak(action["say"], step=idx + 1, of=len(proc["steps"]))
-
-                if action["advance"]:
-                    idx += 1
-                    attempt = 1
-                    if idx >= len(proc["steps"]):
-                        db.finish_session(session_id, "completed")
-                        await ws.send_json(
-                            {"type": "complete", "session_id": session_id}
-                        )
-                        await speak("Procedure complete. Well done.")
-                    else:
-                        await announce_step()
-                else:
-                    attempt += 1
-
-            elif kind == "repeat":
-                if proc is not None:
-                    await announce_step()
-
-            elif kind == "skip":
-                if proc is not None and session_id is not None:
-                    db.log_step_event(
-                        session_id, idx, "skipped",
-                        reason="Manually skipped by operator", attempt=attempt,
-                    )
-                    idx += 1
-                    attempt = 1
-                    if idx >= len(proc["steps"]):
-                        db.finish_session(session_id, "completed_with_skips")
-                        await ws.send_json({"type": "complete", "session_id": session_id})
-                    else:
-                        await announce_step()
-
-            elif kind == "abort":
-                if session_id:
-                    db.finish_session(session_id, "aborted")
-                break
-
-    except WebSocketDisconnect:
-        log.info("guide socket closed")
-    except Exception:  # noqa: BLE001
-        log.exception("guide socket error")
+    await _pump(ws, live.GuideSession(ws))
+    log.info("guide socket closed")
 
 
 # --------------------------------------------------------------- static

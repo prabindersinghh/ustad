@@ -109,12 +109,25 @@ hands are busy.
 """
 
 
+def ground(step: dict[str, Any], frame: bytes) -> list[sam_parse.Detection]:
+    """SAM 3.1 on the step's target phrase. Empty list when not found or on error."""
+    phrase = step.get("target_phrase") or step.get("title") or ""
+    if not phrase:
+        return []
+    try:
+        return meta_client.segment(phrase, frame)
+    except Exception as exc:  # noqa: BLE001 - never let grounding kill the loop
+        log.warning("Grounding failed for %r: %s", phrase, exc)
+        return []
+
+
 def judge_step(
     step: dict[str, Any],
     frame: bytes,
     *,
     worker_said: str | None = None,
     attempt: int = 1,
+    detections: list[sam_parse.Detection] | None = None,
 ) -> dict[str, Any]:
     """Perception + decision for one step, with NO persistence.
 
@@ -128,13 +141,11 @@ def judge_step(
     started = time.perf_counter()
 
     # --- perception -------------------------------------------------------
+    # The live watcher grounds frames continuously; when it hands us a fresh
+    # grounding for this exact frame we skip SAM and only pay for the decision.
     phrase = step.get("target_phrase") or step.get("title") or ""
-    detections: list[sam_parse.Detection] = []
-    if phrase:
-        try:
-            detections = meta_client.segment(phrase, frame)
-        except Exception as exc:  # noqa: BLE001 - never let grounding kill the loop
-            log.warning("Grounding failed for %r: %s", phrase, exc)
+    if detections is None:
+        detections = ground(step, frame)
     grounding = sam_parse.summarise(phrase, detections) if phrase else "Grounding: skipped."
 
     # --- decision ---------------------------------------------------------
@@ -199,43 +210,58 @@ def verify_step(
     frame: bytes,
     worker_said: str | None = None,
     attempt: int = 1,
+    detections: list[sam_parse.Detection] | None = None,
 ) -> dict[str, Any]:
     """Run one perception -> decision -> action cycle. Returns the action taken."""
-    action = judge_step(step, frame, worker_said=worker_said, attempt=attempt)
-    verdict = action["verdict"]
-    latency_ms = action["latency_ms"]
-    grounding = action["grounding"]
-    backend = action["backend"]
+    action = judge_step(step, frame, worker_said=worker_said, attempt=attempt,
+                        detections=detections)
+    return record(session_id=session_id, step=step, frame=frame, action=action, attempt=attempt)
 
-    # --- action -----------------------------------------------------------
+
+def record(
+    *,
+    session_id: str,
+    step: dict[str, Any],
+    frame: bytes,
+    action: dict[str, Any],
+    attempt: int,
+    source: str | None = None,
+) -> dict[str, Any]:
+    """Bank the evidence photo and log the step event for a judged action.
+
+    `source` marks how the check was triggered ("auto" when the live watcher
+    saw the step complete on its own), and is kept in the audit reason.
+    """
+    verdict = action["verdict"]
     evidence_path = None
     if verdict in ("pass", "fail"):
         evidence_path = _save_evidence(session_id, step.get("index", 0), attempt, frame)
 
+    reason = (
+        action["detail"].get("reason")
+        or action["detail"].get("what_is_wrong")
+        or action["detail"].get("what_to_show")
+    )
+    if source and reason:
+        reason = f"[{source}] {reason}"
     db.log_step_event(
         session_id,
         step.get("index", 0),
         verdict,
         confidence=action["detail"].get("confidence"),
-        reason=(
-            action["detail"].get("reason")
-            or action["detail"].get("what_is_wrong")
-            or action["detail"].get("what_to_show")
-        ),
-        grounding=grounding,
+        reason=reason,
+        grounding=action["grounding"],
         evidence_path=evidence_path,
         attempt=attempt,
-        latency_ms=latency_ms,
-        backend=backend,
+        latency_ms=action["latency_ms"],
+        backend=action["backend"],
     )
 
     # judge_step already set verdict, latency_ms, grounding, detections, backend.
-    action.update(
-        advance=(verdict == "pass"),
-        evidence_path=evidence_path,
-    )
-    log.info("step %s attempt %s -> %s in %dms on %s backend",
-             step.get("index"), attempt, verdict, latency_ms, backend)
+    action.update(advance=(verdict == "pass"), evidence_path=evidence_path)
+    log.info("step %s attempt %s -> %s in %dms on %s backend%s",
+             step.get("index"), attempt, verdict, action["latency_ms"], action["backend"],
+             f" ({source})" if source else "")
     return action
 
 
