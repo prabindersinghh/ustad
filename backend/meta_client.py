@@ -1,0 +1,352 @@
+"""Thin wrapper around the Meta Model API.
+
+The API is OpenAI-SDK compatible, so we use the OpenAI client pointed at
+Meta's base URL for the Responses calls, and raw httpx for the ASR endpoint
+(which is not part of the OpenAI surface).
+"""
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import re
+from typing import Any, Iterable
+
+import httpx
+from openai import OpenAI
+
+from . import config, sam_parse
+
+log = logging.getLogger("ustad.meta")
+
+_client: OpenAI | None = None
+_open_client: OpenAI | None = None
+
+
+def client() -> OpenAI:
+    """Hosted Meta Model API. Always used for SAM 3.1 and ASR."""
+    global _client
+    if _client is None:
+        if not config.MODEL_API_KEY:
+            raise RuntimeError(
+                "MODEL_API_KEY is not set. Copy .env.example to .env and add your key."
+            )
+        _client = OpenAI(
+            base_url=config.META_BASE_URL,
+            api_key=config.MODEL_API_KEY,
+            timeout=120.0,
+        )
+    return _client
+
+
+def open_client() -> OpenAI:
+    """Self-deployed open-weights endpoint (Modal / Baseten / on-prem box).
+
+    Modal proxy tokens are used as `wk-<id>.ws-<secret>`; Baseten uses its own
+    key. Either way it is an OpenAI-compatible base URL, so nothing else in
+    Ustad needs to know the difference.
+    """
+    global _open_client
+    if _open_client is None:
+        if not config.open_backend_ready():
+            raise RuntimeError(
+                "Open-weights backend not configured. Set OPEN_BASE_URL and OPEN_MODEL."
+            )
+        _open_client = OpenAI(
+            base_url=config.OPEN_BASE_URL,
+            api_key=config.OPEN_API_KEY or "not-required",
+            timeout=180.0,
+        )
+    return _open_client
+
+
+def active_backend() -> str:
+    """Which engine will answer the next reasoning call."""
+    if config.REASONING_BACKEND == "open" and config.open_backend_ready():
+        return "open"
+    return "hosted"
+
+
+def _data_url(image_bytes: bytes, mime: str = "image/jpeg") -> str:
+    return f"data:{mime};base64,{base64.b64encode(image_bytes).decode()}"
+
+
+def as_image_part(image: str | bytes) -> dict[str, Any]:
+    """Accept raw bytes, a data URL, or an http URL and return an input_image part."""
+    if isinstance(image, bytes):
+        url = _data_url(image)
+    elif image.startswith("data:") or image.startswith("http"):
+        url = image
+    else:  # bare base64
+        url = f"data:image/jpeg;base64,{image}"
+    return {"type": "input_image", "image_url": url}
+
+
+# --------------------------------------------------------------------------
+# Segmentation / grounding
+# --------------------------------------------------------------------------
+
+def segment(phrase: str, image: str | bytes) -> list[sam_parse.Detection]:
+    """Locate every instance of `phrase` in the image using SAM 3.1.
+
+    `phrase` must be a short noun phrase ("red valve handle"), not a question.
+    Always runs on the hosted API -- SAM 3.1 is not an open-weights release.
+    """
+    resp = client().responses.create(
+        model=config.SAM_MODEL,
+        input=[
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": phrase},
+                    as_image_part(image),
+                ],
+            }
+        ],
+        metadata={"include_confidence": "true"},
+    )
+    raw = getattr(resp, "output_text", "") or ""
+    detections = sam_parse.parse(raw)
+    log.info("SAM %r -> %d detections", phrase, len(detections))
+    return detections
+
+
+# --------------------------------------------------------------------------
+# Reasoning
+# --------------------------------------------------------------------------
+
+class _FunctionCall:
+    """Mimics a Responses API function_call item."""
+
+    type = "function_call"
+
+    def __init__(self, name: str, arguments: str) -> None:
+        self.name = name
+        self.arguments = arguments
+
+
+class _Result:
+    """Uniform result shape across the hosted and open-weights backends."""
+
+    def __init__(self, output_text: str, output: list[Any], backend: str) -> None:
+        self.output_text = output_text
+        self.output = output
+        self.backend = backend
+
+
+def reason(
+    instructions: str,
+    content: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    model: str | None = None,
+    force_hosted: bool = False,
+) -> Any:
+    """One reasoning turn, on whichever backend is active.
+
+    `force_hosted` pins a call to the Meta Model API regardless of config --
+    used where a capability only the hosted models have is required.
+    """
+    if not force_hosted and active_backend() == "open":
+        try:
+            return _reason_open(instructions, content, tools=tools)
+        except Exception as exc:  # noqa: BLE001
+            if not config.OPEN_FALLBACK:
+                raise
+            log.warning("Open-weights backend failed (%s); falling back to hosted", exc)
+
+    kwargs: dict[str, Any] = {
+        "model": model or config.SPARK_MODEL,
+        "instructions": instructions,
+        "input": [{"type": "message", "role": "user", "content": content}],
+    }
+    if tools:
+        kwargs["tools"] = tools
+    resp = client().responses.create(**kwargs)
+    try:
+        resp.backend = "hosted"  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - pydantic models may be frozen
+        pass
+    return resp
+
+
+# --- open-weights adapter -------------------------------------------------
+# Self-hosted servers (vLLM behind Modal Endpoints, Baseten, an on-prem box)
+# speak Chat Completions rather than the Responses API, so we translate in
+# both directions and hand the rest of Ustad an identical object.
+
+def _to_chat_content(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for part in content:
+        kind = part.get("type")
+        if kind == "input_text":
+            out.append({"type": "text", "text": part.get("text", "")})
+        elif kind == "input_image":
+            out.append({"type": "image_url", "image_url": {"url": part["image_url"]}})
+        elif kind == "input_audio":
+            out.append({"type": "input_audio", "input_audio": part["input_audio"]})
+    return out
+
+
+def _to_chat_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    converted = []
+    for t in tools:
+        if t.get("type") == "function" and "function" not in t:
+            converted.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("parameters", {}),
+                    },
+                }
+            )
+        else:
+            converted.append(t)
+    return converted
+
+
+def _reason_open(
+    instructions: str,
+    content: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+) -> _Result:
+    kwargs: dict[str, Any] = {
+        "model": config.OPEN_MODEL,
+        "messages": [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": _to_chat_content(content)},
+        ],
+    }
+    if tools:
+        kwargs["tools"] = _to_chat_tools(tools)
+        kwargs["tool_choice"] = "required"
+
+    completion = open_client().chat.completions.create(**kwargs)
+    message = completion.choices[0].message
+
+    calls: list[Any] = []
+    for call in getattr(message, "tool_calls", None) or []:
+        fn = getattr(call, "function", None)
+        if fn is not None:
+            calls.append(_FunctionCall(fn.name, fn.arguments or "{}"))
+
+    return _Result(message.content or "", calls, backend="open")
+
+
+def tool_calls(resp: Any) -> list[dict[str, Any]]:
+    """Pull function calls out of a Responses API result, tolerant of shape."""
+    calls: list[dict[str, Any]] = []
+    for item in getattr(resp, "output", []) or []:
+        if getattr(item, "type", None) == "function_call":
+            raw_args = getattr(item, "arguments", "") or "{}"
+            try:
+                args = json.loads(raw_args)
+            except json.JSONDecodeError:
+                args = {"_unparsed": raw_args}
+            calls.append({"name": getattr(item, "name", ""), "args": args})
+    return calls
+
+
+_JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+
+
+def reason_json(
+    instructions: str,
+    content: list[dict[str, Any]],
+    *,
+    model: str | None = None,
+) -> Any:
+    """Muse Spark turn that must return JSON. Tolerant of fenced output."""
+    resp = reason(
+        instructions + "\n\nRespond with JSON only. No prose, no code fences.",
+        content,
+        model=model,
+    )
+    text = (getattr(resp, "output_text", "") or "").strip()
+
+    for candidate in _json_candidates(text):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    raise ValueError(f"Model did not return parseable JSON. Got: {text[:400]}")
+
+
+def _json_candidates(text: str) -> Iterable[str]:
+    yield text
+    fenced = _JSON_BLOCK.search(text)
+    if fenced:
+        yield fenced.group(1).strip()
+    # Fall back to the outermost braces/brackets.
+    for opener, closer in (("{", "}"), ("[", "]")):
+        start, end = text.find(opener), text.rfind(closer)
+        if start != -1 and end > start:
+            yield text[start : end + 1]
+
+
+# --------------------------------------------------------------------------
+# Speech to text
+# --------------------------------------------------------------------------
+
+def transcribe(
+    audio_bytes: bytes,
+    *,
+    filename: str = "audio.m4a",
+    keywords: list[str] | None = None,
+    language: str | None = None,
+) -> str:
+    """Batch transcription via Muse Voice Transcribe.
+
+    Falls back to audio-capable Muse Spark if the ASR endpoint rejects the
+    request, so a wrong field name never blocks the build.
+    """
+    url = f"{config.META_BASE_URL.rstrip('/')}/asr/transcribe"
+    files = {"file": (filename, audio_bytes, "application/octet-stream")}
+    data: dict[str, str] = {"model": config.ASR_MODEL}
+    if keywords:
+        data["keywords"] = ",".join(keywords)
+    if language:
+        data["language"] = language
+
+    try:
+        r = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {config.MODEL_API_KEY}"},
+            files=files,
+            data=data,
+            timeout=180.0,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        for key in ("text", "transcript", "output_text"):
+            if isinstance(payload.get(key), str):
+                return payload[key].strip()
+        log.warning("ASR returned unexpected shape: %s", list(payload)[:8])
+    except Exception as exc:  # noqa: BLE001 - we intentionally degrade
+        log.warning("ASR endpoint failed (%s); falling back to Spark audio", exc)
+
+    return _transcribe_via_spark(audio_bytes, filename)
+
+
+def _transcribe_via_spark(audio_bytes: bytes, filename: str) -> str:
+    """Fallback: hand the audio to an audio-capable Muse Spark model."""
+    fmt = filename.rsplit(".", 1)[-1].lower() or "m4a"
+    resp = reason(
+        "Transcribe the audio verbatim. Output only the transcript text.",
+        [
+            {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": base64.b64encode(audio_bytes).decode(),
+                    "format": fmt,
+                },
+            }
+        ],
+        model=config.SPARK_AUDIO_MODEL,
+        force_hosted=True,  # open-weights endpoints do not take audio
+    )
+    return (getattr(resp, "output_text", "") or "").strip()

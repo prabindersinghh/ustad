@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+data/*.db
+data/media/
+.venv/
+venv/
+.DS_Store
+.playwright-mcp/

@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#ffffff" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="assets/logo.png" />
+<title>Ustad</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css?v=6" />
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+</head>
+<body>
+
+<!-- ============================================================ home / landing -->
+<section id="screen-home" class="screen active">
+  <header class="nav">
+    <a class="brand" href="#top"><img class="logo" src="assets/logo-blue.png?v=6" alt="" /><span class="wordmark">Ustad</span></a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="#how" data-jump="how">How it works</a>
+      <a href="#loop" data-jump="loop">The loop</a>
+      <a href="#hood" data-jump="hood">Under the hood</a>
+      <a href="#runs" data-jump="runs">Where it runs</a>
+      <a href="#proof" data-jump="proof">Proof</a>
+    </nav>
+    <div class="nav-right">
+      <span class="status" id="home-status" title="Server status"><span id="health-dot" class="dot"></span><span id="health-text">connecting</span></span>
+      <a class="nav-cta" href="/dashboard">Dashboard</a>
+    </div>
+  </header>
+
+  <main class="landing">
+
+    <!-- hero ------------------------------------------------------------ -->
+    <section class="hero" id="top">
+      <div class="sky" aria-hidden="true"></div>
+      <div class="wrap hero-center">
+        <a class="pill" href="#loop"><span>Meta AI Developer Hackathon</span><b>See the loop</b></a>
+        <h1 class="display">Learns a job once.<br><span class="dim">Verifies it every time after.</span></h1>
+        <p class="lede">An expert does the job once, wearing the camera and talking it through. Ustad turns
+          that into a procedure, then guides every worker after them and checks each step against what the
+          camera actually sees before letting them move on.</p>
+        <div class="cta-row">
+          <button class="btn btn-white" data-go="capture">Capture a procedure</button>
+          <button class="btn btn-glass" data-go="library">Follow a procedure</button>
+        </div>
+      </div>
+
+      <div class="wrap">
+        <div class="hero-visual">
+          <svg class="annot-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <line x1="17" y1="22" x2="42" y2="44" />
+            <line x1="84" y1="26" x2="66" y2="50" />
+            <line x1="18" y1="78" x2="31" y2="58" />
+          </svg>
+          <model-viewer id="hero-glasses" src="models/glasses.glb" alt="Ray-Ban Meta smart glasses"
+            interaction-prompt="none" disable-zoom disable-pan disable-tap
+            environment-image="neutral" exposure="1.2" shadow-intensity="0.5" shadow-softness="1"
+            camera-orbit="18deg 84deg 100%" field-of-view="28deg">
+            <div class="mv-loading" slot="poster"><span class="spin"></span></div>
+            <div slot="progress-bar"></div>
+          </model-viewer>
+          <span class="pin" style="left:42%;top:44%"></span>
+          <span class="pin" style="left:66%;top:50%"></span>
+          <span class="pin" style="left:31%;top:58%"></span>
+          <div class="annot mic"><b>Hears the expert</b><i>narration becomes the procedure</i></div>
+          <div class="annot cam"><b>Sees the work</b><i>a camera where the hands are</i></div>
+          <div class="annot spk"><b>Guides the worker</b><i>one step at a time, hands free</i></div>
+
+          <div class="verdict-card" aria-label="Example verification result">
+            <div class="vc-head"><span class="vc-step">Step 3 of 5</span><span class="vc-live"><span></span>live check</span></div>
+            <div class="vc-title">Drain the receiver tank</div>
+            <div class="vc-row">
+              <span class="vc-badge"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg>Verified</span>
+              <span class="vc-conf">confidence <b>0.94</b></span>
+            </div>
+            <div class="vc-meter"><span style="width:94%"></span></div>
+            <code class="vc-call">verify_step()</code>
+          </div>
+        </div>
+
+        <div class="built-on">
+          <span class="built-label">Built on Meta's models</span>
+          <span class="mark-item">SAM 3.1</span>
+          <span class="mark-item">Muse Spark</span>
+          <span class="mark-item">Muse Voice</span>
+          <span class="mark-item">Muse Glimmer</span>
+          <span class="mark-item">Ray-Ban Meta</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- problem --------------------------------------------------------- -->
+    <section class="band tinted" id="problem">
+      <div class="wrap split">
+        <div>
+          <span class="eyebrow">The problem</span>
+          <h2 class="sec-h big">The knowledge leaves before the paperwork arrives.</h2>
+        </div>
+        <div class="split-body">
+          <p class="body">Changeovers, maintenance, quality checks: the work that decides whether a line
+            runs clean is held in people, not documents. When they retire or move on, it goes with them,
+            and the next worker learns it the expensive way, through scrap, downtime and rework.</p>
+          <p class="body">Writing it down does not solve it. A written procedure takes weeks to produce,
+            is out of date the first time the line changes, and can tell you what should have happened but
+            never whether it did.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- how ------------------------------------------------------------- -->
+    <section class="band" id="how">
+      <div class="wrap">
+        <span class="eyebrow">How it works</span>
+        <h2 class="sec-h">One recording in. Every shift covered after.</h2>
+        <div class="two">
+          <article class="mode">
+            <div class="mode-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/></svg></div>
+            <span class="mode-label">Capture, for the expert</span>
+            <h3>Do the job once, out loud</h3>
+            <p>The expert wears the camera and works at their own pace, explaining as they go. Ustad
+              listens, watches, and writes the procedure: ordered steps, the exact settings and torques
+              they mentioned, the hazard to call out before each one, and, critically, what the camera
+              should see when a step is done right.</p>
+          </article>
+          <article class="mode feature">
+            <div class="mode-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4 4 10-10"/></svg></div>
+            <span class="mode-label">Guide, for the worker</span>
+            <h3>Hands free, and checked</h3>
+            <p>The next worker hears one step at a time, hands free. When they say they're done, Ustad
+              looks before it agrees. If the step is right, it advances and banks a photo. If it's wrong,
+              it says so, says why, and holds them there until it's fixed.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- loop ------------------------------------------------------------ -->
+    <section class="band tinted" id="loop">
+      <div class="wrap">
+        <span class="eyebrow">The loop</span>
+        <h2 class="sec-h">What happens when a worker says "done"</h2>
+        <p class="body wide">This is the part that is hard, and the part that matters. Anything can read
+          a checklist aloud. Ustad commits to a judgement about the physical world and acts on it.</p>
+        <figure class="loop-fig">
+          <iframe id="loop-frame" src="figures/loop-embed.html" title="Interactive verification gauge" scrolling="no"></iframe>
+          <figcaption>The loop as one instrument. Hover the figure to slide between a frame done right,
+            one done wrong, and one the camera can't read.
+            <a href="figures/loop.html" target="_blank" rel="noopener">Open full screen</a></figcaption>
+        </figure>
+        <ol class="loop-steps">
+          <li><span class="n">1</span><div><b>See</b><p>The worker's current view is captured the moment they say done.</p></div></li>
+          <li><span class="n">2</span><div><b>Ground</b><p>SAM 3.1 finds the step's target part in that frame and answers with coordinates and a confidence, not an opinion.</p></div></li>
+          <li><span class="n">3</span><div><b>Judge</b><p>Muse Spark weighs the frame, the grounding and the success criteria, and must commit to exactly one action.</p></div></li>
+          <li><span class="n">4</span><div><b>Act</b><p>Advance and bank the evidence, correct the worker, or ask for a clearer view. Guessing is not an option.</p></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- under the hood -------------------------------------------------- -->
+    <section class="band dark" id="hood">
+      <div class="wrap">
+        <span class="eyebrow">Under the hood</span>
+        <h2 class="sec-h">Pixels in. One decision out.</h2>
+        <p class="body wide">This is one real check, from the raw model output to the action the server
+          takes. Every stage is structured, so every stage can be logged, audited and replayed.</p>
+        <div class="pipe">
+          <article class="pane">
+            <header><span class="pane-n">1</span>SAM 3.1 returns</header>
+<pre><span class="t-p">&lt;0f&gt;</span>0<span class="t-p">&lt;|box;</span><span class="t-k">x1</span>=<span class="t-n">402</span>;<span class="t-k">y1</span>=<span class="t-n">318</span>;
+<span class="t-k">x2</span>=<span class="t-n">611</span>;<span class="t-k">y2</span>=<span class="t-n">497</span>;<span class="t-k">w</span>=<span class="t-n">1280</span>;
+<span class="t-k">h</span>=<span class="t-n">960</span>;<span class="t-k">c</span>=<span class="t-n">0.94</span><span class="t-p">|&gt;</span></pre>
+            <p>A box and a confidence for "tank drain valve". Not a sentence.</p>
+          </article>
+          <article class="pane">
+            <header><span class="pane-n">2</span>Ustad grounds it</header>
+<pre><span class="t-s">Grounding:</span> searched the frame for
+<span class="t-s">"tank drain valve"</span>, found <span class="t-n">1</span> match.
+  <span class="t-n">1.</span> centre of frame, covering
+     <span class="t-n">3.1%</span> of the frame, <span class="t-k">conf</span> <span class="t-n">0.94</span></pre>
+            <p>Parsed into a plain-language report the reasoning model can weigh.</p>
+          </article>
+          <article class="pane hot">
+            <header><span class="pane-n">3</span>Muse Spark must act</header>
+<pre><span class="t-f">verify_step</span>({
+  <span class="t-k">"confidence"</span>: <span class="t-n">0.94</span>,
+  <span class="t-k">"reason"</span>: <span class="t-s">"Lever closed, no water"</span>,
+  <span class="t-k">"say"</span>: <span class="t-s">"Good. Next step."</span>
+})</pre>
+            <p>One tool call. The server advances, banks the photo, speaks the next step.</p>
+          </article>
+        </div>
+        <div class="tools">
+          <span class="tools-label">The only three things it is allowed to do</span>
+          <code class="tool ok">verify_step</code>
+          <code class="tool bad">flag_error</code>
+          <code class="tool warn">request_better_view</code>
+        </div>
+      </div>
+    </section>
+
+    <!-- different ------------------------------------------------------- -->
+    <section class="band" id="different">
+      <div class="wrap">
+        <span class="eyebrow">Why it's different</span>
+        <h2 class="sec-h">Built to be wrong out loud</h2>
+        <div class="three">
+          <article class="col">
+            <div class="col-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg></div>
+            <h3>It refuses to guess</h3>
+            <p>When the camera cannot see enough to judge a step, Ustad says so and asks the worker to
+              reposition. A confident wrong answer on a factory floor is worse than no answer, so it is not
+              an option the system has.</p>
+          </article>
+          <article class="col">
+            <div class="col-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></div>
+            <h3>It checks its own procedures</h3>
+            <p>A generated step is only useful if the thing it names can be found. After writing a
+              procedure, Ustad runs the segmentation model back over the expert's own footage to confirm
+              every step names something real and visible, and rewrites the ones that don't.</p>
+          </article>
+          <article class="col">
+            <div class="col-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="2.5"/><circle cx="12" cy="13" r="3.5"/><path d="M8.5 6l1.5-2.5h4L15.5 6"/></svg></div>
+            <h3>It writes the audit trail for you</h3>
+            <p>Every judged step leaves a timestamped photo. A finished job produces the record a
+              supervisor would otherwise have to chase, without anyone filling in a form.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- statement ------------------------------------------------------- -->
+    <section class="statement">
+      <div class="wrap">
+        <p class="statement-big">The visual evidence decides what happens next.</p>
+        <p class="statement-small">That is the line between a copilot and a chatbot describing a photograph.</p>
+      </div>
+    </section>
+
+    <!-- where it runs --------------------------------------------------- -->
+    <section class="band tinted" id="runs">
+      <div class="wrap">
+        <span class="eyebrow">Where it runs</span>
+        <h2 class="sec-h">One copilot. Two ways to wear it.</h2>
+        <div class="device-grid">
+          <article class="device">
+            <div class="device-stage">
+              <model-viewer src="models/iphone.glb" alt="Phone running Ustad" auto-rotate
+                rotation-per-second="18deg" camera-controls disable-zoom disable-pan interaction-prompt="none"
+                environment-image="neutral" exposure="1.1" shadow-intensity="0.6" loading="lazy" reveal="auto"
+                touch-action="pan-y" camera-orbit="0deg 82deg 160%"><div slot="progress-bar"></div></model-viewer>
+            </div>
+            <span class="tag">Today</span>
+            <h3>Works on a phone</h3>
+            <p>Strap a phone to your chest and you have a point-of-view camera, a microphone and a speaker:
+              everything the loop needs, with nothing to install and nothing to buy.</p>
+          </article>
+          <article class="device feature">
+            <div class="device-stage">
+              <model-viewer src="models/glasses.glb" alt="Ray-Ban Meta glasses" auto-rotate
+                rotation-per-second="18deg" camera-controls disable-zoom disable-pan interaction-prompt="none"
+                environment-image="neutral" exposure="1.15" shadow-intensity="0.7" loading="lazy" reveal="auto"
+                touch-action="pan-y" camera-orbit="24deg 80deg 110%"><div slot="progress-bar"></div></model-viewer>
+            </div>
+            <span class="tag blue">Where it's going</span>
+            <h3>Comes alive on smart glasses</h3>
+            <p>Glasses put the camera where the hands are and keep them free. The backend does not change:
+              the camera is an interface, not an assumption.</p>
+          </article>
+        </div>
+
+        <div class="privacy">
+          <div>
+            <h2 class="sec-h">Your footage can stay on your floor</h2>
+            <p class="body">The first question a plant asks is not about accuracy. It is whether video of
+              their line leaves the site. Ustad runs its verification reasoning on a Meta open-weight model,
+              and every judged step records which engine decided it, so the answer to "where did our footage
+              go" is a log, not a promise.</p>
+          </div>
+          <div class="tiers">
+            <article class="tier"><h3>Hosted</h3><p>Meta Model API. Fastest to stand up.</p></article>
+            <article class="tier"><h3>Partner-served</h3><p>Muse Spark Open on managed inference. Full quality, no hardware.</p></article>
+            <article class="tier on"><h3>On-premise</h3><p>Muse Glimmer on one GPU inside the plant. Nothing leaves.</p></article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- proof ----------------------------------------------------------- -->
+    <section class="band" id="proof">
+      <div class="wrap">
+        <span class="eyebrow">Proof</span>
+        <h2 class="sec-h">Tested on a real line, not a desk</h2>
+        <p class="body wide">Built against a working paint manufacturer, on procedures their people actually
+          run, with their expert and their equipment. Novices ran the same job twice, once the way the plant
+          does it today and once with Ustad, and we planted errors on purpose to find out what it catches.</p>
+        <div class="proof-grid">
+          <table class="data">
+            <tbody>
+              <tr><td>Correct steps confirmed</td><td class="pending">pending factory trial</td></tr>
+              <tr><td>Planted errors caught</td><td class="pending">pending factory trial</td></tr>
+              <tr><td>Novice time vs current method</td><td class="pending">pending factory trial</td></tr>
+              <tr><td>Expert recording to usable procedure</td><td class="pending">pending factory trial</td></tr>
+              <tr><td>Median time per verified step</td><td class="pending">pending factory trial</td></tr>
+            </tbody>
+          </table>
+          <table class="data stack">
+            <tbody>
+              <tr><td><b>SAM 3.1</b></td><td>Grounds each step's target part in the live frame.</td></tr>
+              <tr><td><b>Muse Spark</b></td><td>Weighs frame, grounding and criteria; commits to one tool call.</td></tr>
+              <tr><td><b>Muse Voice</b></td><td>Turns narration into the procedure, and speech into commands.</td></tr>
+              <tr><td><b>Muse Glimmer</b></td><td>The same loop on open weights the operator can host.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="caption">Numbers come straight from <code>scripts/evaluate.py</code> once the trial runs.
+          The method, failure cases and limitations live in the repository. The errors it missed are listed
+          alongside the ones it caught.</p>
+      </div>
+    </section>
+
+    <!-- footer ---------------------------------------------------------- -->
+    <footer class="land-foot">
+      <div class="wrap foot-grid">
+        <div>
+          <a class="brand light" href="#top"><img class="logo" src="assets/logo.png" alt="" /><span class="wordmark">Ustad</span></a>
+          <p class="foot-note">Ustad is ten days old, built for the Meta Global AI Developer Hackathon. It
+            has been run on real procedures at one factory. The code is open, and the evaluation method, the
+            numbers and the failure cases are all in the repository.</p>
+        </div>
+        <div class="foot-cta">
+          <a class="btn btn-ghost-dark" id="repo-link" href="#"><span class="btn-k">Read the code</span><span class="btn-sub">on GitHub</span></a>
+          <a class="btn btn-primary" href="/dashboard"><span class="btn-k">See a session report</span><span class="btn-sub">supervisor view</span></a>
+        </div>
+      </div>
+    </footer>
+  </main>
+</section>
+
+<!-- ============================================================ capture -->
+<section id="screen-capture" class="screen">
+  <div class="camera-wrap">
+    <video id="cap-video" playsinline muted autoplay></video>
+    <div class="overlay-top">
+      <button class="back" data-go="home">&larr;</button>
+      <span id="cap-badge" class="badge">ready</span>
+    </div>
+    <div class="overlay-bottom">
+      <p id="cap-status" class="status-line">Describe each step out loud as you do it.</p>
+      <button id="cap-btn" class="cockpit-primary">Start recording</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ library -->
+<section id="screen-library" class="screen light-screen">
+  <header class="bar">
+    <button class="back dark" data-go="home">&larr;</button>
+    <h2>Procedures</h2>
+  </header>
+  <div id="library-list" class="list"></div>
+</section>
+
+<!-- ============================================================ guide -->
+<section id="screen-guide" class="screen">
+  <div class="camera-wrap">
+    <video id="guide-video" playsinline muted autoplay></video>
+    <canvas id="guide-overlay"></canvas>
+    <div class="overlay-top">
+      <button class="back" data-go="home">&larr;</button>
+      <span id="guide-progress" class="badge">step</span>
+    </div>
+    <div id="verdict-flash" class="verdict-flash"></div>
+    <div class="overlay-bottom">
+      <p id="guide-step-title" class="step-title"></p>
+      <p id="guide-instruction" class="instruction">Starting…</p>
+      <div class="guide-controls">
+        <button id="guide-repeat" class="ghost">Repeat</button>
+        <button id="guide-done" class="cockpit-primary">Done. Check it</button>
+        <button id="guide-skip" class="ghost">Skip</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ report -->
+<section id="screen-report" class="screen light-screen">
+  <header class="bar">
+    <button class="back dark" data-go="home">&larr;</button>
+    <h2>Session report</h2>
+  </header>
+  <div id="report-body" class="list"></div>
+</section>
+
+<script src="app.js?v=3"></script>
+</body>
+</html>

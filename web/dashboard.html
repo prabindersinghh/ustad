@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ustad · Supervisor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230064E0'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='800'%3EU%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --blue:#0064e0; --blue-600:#0052bd; --ink:#0a1020; --ink-soft:#33405c;
+    --muted:#64728c; --white:#fff; --cloud:#eef3fc; --cloud-2:#f6f9ff;
+    --line:#dbe6f7; --ok:#12a06a; --bad:#e5484d; --warn:#e8900a;
+    --shadow:0 12px 34px rgba(10,50,120,.10); --shadow-sm:0 4px 16px rgba(10,50,120,.07);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 560px at 78% -10%, #e9f1ff 0%, rgba(233,241,255,0) 55%),
+      var(--cloud-2);
+    color:var(--ink);
+    font:16px/1.5 "Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--blue);text-decoration:none}
+  header.top{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:18px 28px; border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:5;
+    background:rgba(255,255,255,.82); backdrop-filter:saturate(1.4) blur(12px);
+  }
+  header.top h1{margin:0;font-size:21px;font-weight:800;letter-spacing:-.02em;display:flex;align-items:center;gap:10px}
+  header.top h1 .mark{display:inline-grid;place-items:center;width:28px;height:28px;background:var(--blue);
+    color:#fff;border-radius:8px;font-size:17px;font-weight:800}
+  header.top h1 small{color:var(--muted);font-weight:500;font-size:14px}
+  .backend-chip{font-size:13px;color:var(--muted)}
+  .backend-chip b{color:var(--ink);font-weight:600}
+  .wrap{max-width:1200px;margin:0 auto;padding:26px 28px 72px}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(156px,1fr));gap:14px;margin-bottom:26px}
+  .kpi{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:var(--shadow-sm)}
+  .kpi .v{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums}
+  .kpi .v.ok{color:var(--ok)} .kpi .v.bad{color:var(--bad)} .kpi .v.accent{color:var(--blue)}
+  .kpi .l{font-size:13px;color:var(--ink-soft);font-weight:600;margin-top:7px}
+  .kpi .sub{font-size:12px;color:var(--muted);margin-top:3px}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  @media(max-width:880px){.cols{grid-template-columns:1fr}}
+  .panel{background:var(--white);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow-sm)}
+  .panel h2{margin:0;padding:17px 20px;font-size:16px;font-weight:700;border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center}
+  .panel h2 .count{color:var(--muted);font-weight:500;font-size:13px}
+  .rows{max-height:560px;overflow:auto}
+  .row{padding:15px 20px;border-bottom:1px solid var(--line);cursor:pointer;display:block;width:100%;
+    text-align:left;background:none;border-left:3px solid transparent;color:var(--ink);font:inherit}
+  .row:last-child{border-bottom:none}
+  .row:hover{background:var(--cloud-2)}
+  .row.sel{border-left-color:var(--blue);background:var(--cloud)}
+  .row .t{font-weight:700;letter-spacing:-.01em}
+  .row .m{font-size:13px;color:var(--muted);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pill{font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--cloud-2)}
+  .pill.ok{color:var(--ok);border-color:#bfe6d4;background:#eafaf2}
+  .pill.bad{color:var(--bad);border-color:#f6c9cb;background:#fdecec}
+  .pill.warn{color:var(--warn);border-color:#f4ddb0;background:#fdf4e3}
+  .pill.backend{color:var(--blue-600);border-color:#c4dcff;background:#eef5ff}
+  .empty{padding:44px 18px;text-align:center;color:var(--muted)}
+
+  #detail{margin-top:22px}
+  .steps{display:grid;gap:12px}
+  .step{background:var(--white);border:1px solid var(--line);border-radius:16px;padding:16px 18px;
+    border-left:3px solid var(--line);display:grid;grid-template-columns:1fr 168px;gap:18px;box-shadow:var(--shadow-sm)}
+  .step.pass{border-left-color:var(--ok)} .step.fail{border-left-color:var(--bad)}
+  .step.retry{border-left-color:var(--warn)} .step.skipped{border-left-color:var(--muted)}
+  .step .h{font-weight:700;margin-bottom:7px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .step .kv{font-size:13px;color:var(--ink-soft);margin:4px 0}
+  .step .kv b{color:var(--ink);font-weight:600}
+  .step img{width:168px;height:126px;object-fit:cover;border-radius:12px;background:#000;border:1px solid var(--line)}
+  .step .noimg{width:168px;height:126px;border-radius:12px;border:1px dashed var(--line);
+    display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px;text-align:center}
+  .muted{color:var(--muted)}
+  .hint{font-size:14px;color:var(--muted);padding:12px 2px}
+  code{color:var(--blue-600);font-weight:600}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1><span class="mark">U</span>stad <small>supervisor dashboard</small></h1>
+  <div class="backend-chip" id="backend-chip">loading…</div>
+</header>
+
+<div class="wrap">
+  <div class="kpis" id="kpis"></div>
+
+  <div class="cols">
+    <section class="panel">
+      <h2>Procedures <span class="count" id="proc-count"></span></h2>
+      <div class="rows" id="proc-rows"><div class="empty">Loading…</div></div>
+    </section>
+    <section class="panel">
+      <h2>Sessions <span class="count" id="sess-count"></span></h2>
+      <div class="rows" id="sess-rows"><div class="empty">Loading…</div></div>
+    </section>
+  </div>
+
+  <div id="detail"><p class="hint">Select a procedure or a session above to see its detail here.</p></div>
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s==null?'':s).replace(/[&<>"']/g,
+  (c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtTime = (ts) => ts ? new Date(ts*1000).toLocaleString() : 'n/a';
+const dur = (a,b) => (a&&b) ? Math.round(b-a)+'s' : 'n/a';
+
+async function getJSON(u){ const r = await fetch(u); if(!r.ok) throw new Error(u); return r.json(); }
+
+getJSON('/api/health').then((h)=>{
+  const where = h.reasoning_backend==='open' ? 'self-hosted open weights' : 'Meta Model API (hosted)';
+  $('backend-chip').innerHTML =
+    `reasoning: <b>${esc(h.models.reasoning)}</b> · ${esc(where)} · SAM <b>${esc(h.models.sam)}</b>`
+    + (h.key_configured ? '' : ' · <span style="color:var(--bad)">no API key</span>');
+}).catch(()=>{ $('backend-chip').textContent='backend unreachable'; });
+
+function kpi(v, l, sub, cls){
+  return `<div class="kpi"><div class="v ${cls||''}">${v}</div><div class="l">${l}</div>`
+       + (sub?`<div class="sub">${sub}</div>`:'')+`</div>`;
+}
+getJSON('/api/metrics').then((m)=>{
+  const checks = m.checks||0;
+  const passRate = m.pass_rate!=null ? Math.round(m.pass_rate*100)+'%' : 'n/a';
+  const byB = m.checks_by_backend||{};
+  const bLine = Object.keys(byB).length
+    ? Object.entries(byB).map(([k,n])=>`${esc(k)}: ${n}`).join(' · ') : 'no checks yet';
+  $('kpis').innerHTML =
+      kpi(checks, 'Steps verified', `${m.n||0} sessions`, 'accent')
+    + kpi(passRate, 'Pass rate', `${m.passes||0} passed`, 'ok')
+    + kpi(m.fails||0, 'Errors caught', 'planted or real', (m.fails?'bad':''))
+    + kpi((m.avg_latency_ms!=null?m.avg_latency_ms+'ms':'n/a'), 'Mean latency', 'per check')
+    + kpi((m.avg_duration_s!=null?m.avg_duration_s+'s':'n/a'), 'Mean session', 'start to finish')
+    + kpi(`<span style="font-size:15px;line-height:1.4">${esc(bLine)}</span>`, 'Checks by backend',
+          'which model judged');
+}).catch(()=>{ $('kpis').innerHTML = '<div class="empty">Metrics unavailable.</div>'; });
+
+let selProc=null;
+getJSON('/api/procedures').then((ps)=>{
+  $('proc-count').textContent = ps.length ? ps.length+' total' : '';
+  const box = $('proc-rows');
+  if(!ps.length){ box.innerHTML='<div class="empty">No procedures yet. Capture one on the phone.</div>'; return; }
+  box.innerHTML='';
+  ps.forEach((p)=>{
+    const b=document.createElement('button'); b.className='row';
+    b.innerHTML=`<div class="t">${esc(p.title)}</div>`
+      +`<div class="m"><span>${p.step_count} steps</span>`
+      +`${p.machine?`<span>· ${esc(p.machine)}</span>`:''}`
+      +`<span>· ${fmtTime(p.created_at)}</span></div>`;
+    b.onclick=()=>{ selectRow('proc',b); showProcedure(p.id); };
+    box.appendChild(b);
+  });
+}).catch(()=>{ $('proc-rows').innerHTML='<div class="empty">Could not load procedures.</div>'; });
+
+async function showProcedure(id){
+  const p = await getJSON('/api/procedures/'+id);
+  let html = `<section class="panel"><h2>${esc(p.title)}
+      <span class="count">${p.steps.length} steps${p.machine?' · '+esc(p.machine):''}</span></h2>
+      <div style="padding:16px 18px"><div class="steps">`;
+  p.steps.forEach((s)=>{
+    html += `<div class="step">
+      <div>
+        <div class="h">${s.index+1}. ${esc(s.title)}</div>
+        <div class="kv"><b>Say:</b> ${esc(s.instruction)}</div>
+        <div class="kv"><b>Target phrase:</b> <code>${esc(s.target_phrase||'n/a')}</code></div>
+        <div class="kv"><b>Success criteria:</b> ${esc(s.success_criteria||'n/a')}</div>
+        ${s.common_mistake?`<div class="kv"><b>Common mistake:</b> ${esc(s.common_mistake)}</div>`:''}
+        ${s.hazard?`<div class="kv"><b>Hazard:</b> ${esc(s.hazard)}</div>`:''}
+      </div>
+      <div class="noimg">grounded by<br>SAM 3.1</div>
+    </div>`;
+  });
+  html += `</div></div></section>`;
+  $('detail').innerHTML = html;
+  $('detail').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+getJSON('/api/sessions').then((ss)=>{
+  $('sess-count').textContent = ss.length ? ss.length+' total' : '';
+  const box=$('sess-rows');
+  if(!ss.length){ box.innerHTML='<div class="empty">No sessions run yet.</div>'; return; }
+  box.innerHTML='';
+  ss.forEach((s)=>{
+    const outcome = s.outcome||'in progress';
+    const cls = s.outcome==='completed'?'ok':(s.outcome==='aborted'?'bad':'warn');
+    const b=document.createElement('button'); b.className='row';
+    b.innerHTML=`<div class="t">${esc(s.procedure_title||'(unknown procedure)')}</div>`
+      +`<div class="m">`
+      +`<span class="pill ${cls}">${esc(outcome)}</span>`
+      +`${s.worker_name?`<span>${esc(s.worker_name)}</span>`:'<span class="muted">unnamed worker</span>'}`
+      +`${s.failures?`<span class="pill bad">${s.failures} caught</span>`:''}`
+      +`<span>· ${dur(s.started_at,s.finished_at)}</span>`
+      +`</div>`;
+    b.onclick=()=>{ selectRow('sess',b); showSession(s.id); };
+    box.appendChild(b);
+  });
+}).catch(()=>{ $('sess-rows').innerHTML='<div class="empty">Could not load sessions.</div>'; });
+
+async function showSession(id){
+  const data = await getJSON('/api/sessions/'+id);
+  const sess = data.session||{}; const events = data.events||[];
+  const passes = events.filter(e=>e.verdict==='pass').length;
+  const fails = events.filter(e=>e.verdict==='fail').length;
+  const avg = events.length ? Math.round(events.reduce((a,e)=>a+(e.latency_ms||0),0)/events.length) : 0;
+
+  let html = `<section class="panel"><h2>Session: ${esc(sess.procedure_title||sess.procedure_id||'')}
+      <span class="count">${passes} passed · ${fails} caught · ${avg}ms avg ·
+      ${dur(sess.started_at,sess.finished_at)}</span></h2>
+      <div style="padding:16px 18px"><div class="steps">`;
+  if(!events.length) html += '<div class="empty">No step events recorded.</div>';
+  events.forEach((e)=>{
+    const conf = e.confidence!=null ? ` · ${Number(e.confidence).toFixed(2)}` : '';
+    const img = e.evidence_path
+      ? `<img loading="lazy" src="/${esc(e.evidence_path)}" alt="evidence">`
+      : `<div class="noimg">no photo<br>(retry / skip)</div>`;
+    html += `<div class="step ${esc(e.verdict)}">
+      <div>
+        <div class="h">Step ${e.step_index+1}
+          <span class="pill ${e.verdict==='pass'?'ok':e.verdict==='fail'?'bad':'warn'}">${esc(e.verdict)}${conf}</span>
+          ${e.backend?`<span class="pill backend">${esc(e.backend)}</span>`:''}
+          ${e.latency_ms?`<span class="muted" style="font-size:12px">${e.latency_ms}ms</span>`:''}
+        </div>
+        <div class="kv"><b>Reason:</b> ${esc(e.reason||'n/a')}</div>
+        ${e.grounding?`<div class="kv" style="white-space:pre-wrap">${esc(e.grounding)}</div>`:''}
+        ${e.attempt>1?`<div class="kv muted">attempt ${e.attempt}</div>`:''}
+      </div>
+      ${img}
+    </div>`;
+  });
+  html += `</div></div></section>`;
+  $('detail').innerHTML = html;
+  $('detail').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function selectRow(group, el){
+  document.querySelectorAll('.row.sel').forEach(r=>r.classList.remove('sel'));
+  el.classList.add('sel');
+}
+</script>
+</body>
+</html>
