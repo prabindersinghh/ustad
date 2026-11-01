@@ -43,6 +43,16 @@ log = logging.getLogger("ustad.live")
 GUIDE_KEYWORDS = ["done", "repeat", "skip", "next", "what's wrong", "where"]
 
 
+def inferable(step: dict[str, Any]) -> bool:
+    """Can this step be credited from a later picture of the work?
+
+    Never for a step with a hazard (a lockout is not visible afterwards), a
+    reading, a timer, or a voice confirmation: those must be done and checked
+    on their own, whatever the model claims.
+    """
+    return not step.get("hazard") and (step.get("check") or "visual") == "visual"
+
+
 def decode_frame(payload: str) -> bytes:
     if payload.startswith("data:"):
         payload = payload.split(",", 1)[1]
@@ -487,20 +497,32 @@ class GuideSession:
             # furthest later step whose end state it can see. The steps in
             # between are credited as "inferred" (not "pass") with the same
             # photo, so the record says exactly how each one was established.
+            # completed_through is the model's claim, so it is advisory: the
+            # server stops the jump at the first step that must not be
+            # inferred from a later picture (a hazard/lockout, a reading, a
+            # timer, a voice confirmation). The operator does that one.
             through = action["detail"].get("completed_through")
             next_idx = self.idx + 1
             if isinstance(through, (int, float)) and self.idx + 1 < int(through) <= n:
                 through = int(through)
+                credited = []
                 for j in range(self.idx + 1, through):
+                    if not inferable(self.proc["steps"][j]):
+                        break
                     db.log_step_event(
                         self.session_id, j, "inferred",
                         reason=f"End state of step {through} seen while checking step {self.idx + 1}",
                         evidence_path=action.get("evidence_path"), attempt=1,
                         latency_ms=action.get("latency_ms"), backend=action.get("backend"),
                     )
-                await self.speak(f"Steps {self.idx + 2} to {through} are already done.", step=self.idx + 1, of=n)
-                log.info("jumped from step %d to %d on visible end state", self.idx + 1, through)
-                next_idx = through
+                    credited.append(j)
+                if credited:
+                    first, last = credited[0] + 1, credited[-1] + 1
+                    span = f"Step {first} is" if first == last else f"Steps {first} to {last} are"
+                    await self.speak(f"{span} already done.", step=self.idx + 1, of=n)
+                    log.info("jumped from step %d past %d on visible end state (model claimed %d)",
+                             self.idx + 1, last, through)
+                next_idx = self.idx + 1 + len(credited)
             self.idx = next_idx
             self.attempt = 1
             if self.idx >= n:
@@ -521,15 +543,16 @@ class GuideSession:
         self.finished = True
         outcome, summary = "completed", "Procedure complete. Well done."
         frame = frame or (self.latest[0] if self.latest else None)
-        if self.skipped and frame:
-            steps = [self.proc["steps"][i] for i in self.skipped]
+        auditable = [i for i in self.skipped if inferable(self.proc["steps"][i])]
+        if self.skipped and frame and auditable:
+            steps = [self.proc["steps"][i] for i in auditable]
             try:
                 verdicts = await asyncio.to_thread(guide.audit_skipped, steps, frame)
             except Exception as exc:  # noqa: BLE001
                 log.warning("final audit failed: %s", exc)
                 verdicts = {}
             covered = []
-            for i in self.skipped:
+            for i in auditable:                   # safety-gated steps are never credited
                 v = verdicts.get(i, {})
                 if v.get("status") == "satisfied":
                     covered.append(i + 1)
@@ -545,6 +568,8 @@ class GuideSession:
             log.info("final audit: skipped %s, covered %s", [i + 1 for i in self.skipped], covered)
         elif self.skipped:
             outcome = "completed_with_skips"
+            summary = (f"Done, but step{'s' if len(self.skipped) > 1 else ''} "
+                       f"{', '.join(str(i + 1) for i in self.skipped)} were skipped and can't be confirmed.")
         db.finish_session(self.session_id, outcome)
         await self.out.send({"type": "complete", "session_id": self.session_id})
         await self.speak(summary)
