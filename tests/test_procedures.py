@@ -118,6 +118,51 @@ def test_no_failures_means_no_regeneration():
     assert out["_validation"]["failed_after"] == []
 
 
+def _watched(i, target, hazard):
+    s = _step(i, target, 0)
+    s["watch_for"] = [{"phrase": hazard, "role": "hazard"}]
+    return s
+
+
+def test_unfound_hazard_phrase_triggers_a_repair():
+    frames = [b"f0"]
+    proc = {"title": "T", "machine": None, "steps": [_watched(0, "red stop button", "circular saw blade")]}
+    repaired = {"title": "T", "machine": None, "steps": [_watched(0, "red stop button", "gear")]}
+    good = {"red stop button", "gear"}
+
+    out = procedures._validate_and_repair(
+        proc, frames, "t", hint=None,
+        segment_fn=lambda p, f: ["det"] if p in good else [], generate_fn=lambda: repaired,
+    )
+    v = out["_validation"]
+    assert v["repaired"] is True and v["watch_missing_before"] == ["circular saw blade"]
+    assert out["steps"][0]["watch_for"][0] == {"phrase": "gear", "role": "hazard", "trackable": True}
+    assert v["watch_untracked"] == []
+
+
+def test_hazard_still_unfound_is_marked_not_trackable():
+    frames = [b"f0"]
+    proc = {"title": "T", "machine": None, "steps": [_watched(0, "red stop button", "saw blade")]}
+
+    out = procedures._validate_and_repair(
+        proc, frames, "t", hint=None,
+        segment_fn=lambda p, f: ["det"] if p == "red stop button" else [],
+        generate_fn=lambda: {"title": "T", "machine": None,
+                             "steps": [_watched(0, "red stop button", "blade")]},
+    )
+    item = out["steps"][0]["watch_for"][0]
+    assert item["trackable"] is False
+    assert out["_validation"]["watch_untracked"] == [item["phrase"]]
+
+
+def test_sam_error_does_not_mark_a_phrase_untrackable():
+    def boom(p, f):
+        raise RuntimeError("SAM down")
+    steps = [_watched(0, "x", "saw blade")]
+    assert procedures._check_watch(steps, [b"f0"], boom) == []
+    assert steps[0]["watch_for"][0]["trackable"] is True
+
+
 def test_normalise_clamps_keyframe_index_and_drops_empty_instructions():
     data = {
         "title": "Changeover",

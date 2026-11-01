@@ -61,6 +61,13 @@ Produce a JSON object:
       "reading": {"what": "<e.g. discharge pressure>", "unit": "<e.g. bar>",
                   "min": <number or null>, "max": <number or null>} or null,
       "duration_s": <seconds to run or wait, for a 'timed' step, else null>,
+      "watch_for": [ {"phrase": "<short noun phrase of another VISIBLE object
+                     that matters during this step>", "role": "hazard" | "tool"} ]
+                   (0 to 2 items. 'hazard' = a part the hands must keep clear of
+                   during this step: a blade, a rotating shaft, a belt, a hot
+                   surface, a live terminal. 'tool' = the tool the step needs:
+                   a torque wrench, a spanner, a scraper. Only objects you can
+                   see in the keyframes.),
       "common_mistake": "<the most likely error, or null>",
       "hazard": "<safety warning to speak before the step, or null>"
     }
@@ -220,36 +227,90 @@ def _validate_and_repair(
     )
 
     failures = _check_grounding(proc["steps"], frames, segment_fn)
+    # Hazards and tools are checked the same way: a hazard phrase SAM can't
+    # find would otherwise be silently unwatched during guidance.
+    watch_missing = _check_watch(proc["steps"], frames, segment_fn)
     report: dict[str, Any] = {
         "ran": True,
         "steps_checked": len(proc["steps"]),
         "failed_before": [f["target_phrase"] for f in failures],
+        "watch_missing_before": [w["phrase"] for _, w in watch_missing],
         "repaired": False,
     }
 
-    if failures:
+    if failures or watch_missing:
         failures_block = "\n".join(
-            f"  - step {f['index'] + 1} ({f['title']!r}): "
-            f"target_phrase {f['target_phrase']!r} not found"
-            for f in failures
+            [f"  - step {f['index'] + 1} ({f['title']!r}): "
+             f"target_phrase {f['target_phrase']!r} not found" for f in failures]
+            + [f"  - step {s['index'] + 1} ({s['title']!r}): watch_for {w['role']} {w['phrase']!r} "
+               f"not found; name it the way it looks in the frames, or drop it if it isn't visible"
+               for s, w in watch_missing]
         )
-        log.info("%d target phrase(s) failed grounding; regenerating", len(failures))
+        log.info("%d target and %d watch phrase(s) failed grounding; regenerating",
+                 len(failures), len(watch_missing))
         try:
             repaired = generate_fn()
             still = _check_grounding(repaired["steps"], frames, segment_fn)
+            still_watch = _check_watch(repaired["steps"], frames, segment_fn)
             report["repaired"] = True
             report["failed_after"] = [f["target_phrase"] for f in still]
             # Only accept the repair if it did not make things worse.
-            if len(still) <= len(failures):
+            if len(still) + len(still_watch) <= len(failures) + len(watch_missing):
                 proc = repaired
+            else:
+                report["failed_after"] = report["failed_before"]
         except Exception:  # noqa: BLE001
             log.exception("Repair regeneration failed; keeping original procedure")
             report["failed_after"] = report["failed_before"]
     else:
         report["failed_after"] = []
 
+    # Every watch item now carries `trackable` from its own check; anything
+    # SAM still can't find is shown as not tracked rather than pretended.
+    report["watch_untracked"] = [w["phrase"] for s in proc["steps"] for w in (s.get("watch_for") or [])
+                                 if w.get("trackable") is False]
     proc["_validation"] = report
     return proc
+
+
+def _check_watch(
+    steps: list[dict[str, Any]],
+    frames: list[bytes],
+    segment_fn: Callable[[str, bytes], list[Any]],
+) -> list[tuple[dict[str, Any], dict[str, str]]]:
+    """Ground each step's watch_for phrases on its keyframe, in parallel.
+
+    Sets item["trackable"] in place and returns the (step, item) pairs SAM
+    could not find. A SAM error is not evidence of a bad phrase: those stay
+    trackable.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    jobs = []
+    for step in steps:
+        ki = step.get("keyframe_index")
+        if not isinstance(ki, int) or not (0 <= ki < len(frames)):
+            ki = min(step.get("index", 0), len(frames) - 1)
+        for item in step.get("watch_for") or []:
+            jobs.append((step, item, frames[ki]))
+    if not jobs:
+        return []
+
+    def found(job) -> bool:
+        try:
+            return bool(segment_fn(job[1]["phrase"], job[2]))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Watch check errored for %r: %s", job[1]["phrase"], exc)
+            return True
+
+    with ThreadPoolExecutor(max_workers=min(6, len(jobs))) as pool:
+        ok = list(pool.map(found, jobs))
+    missing = []
+    for (step, item, _), hit in zip(jobs, ok):
+        item["trackable"] = hit
+        if not hit:
+            missing.append((step, item))
+    return missing
 
 
 def _check_grounding(
@@ -286,6 +347,24 @@ def _check_grounding(
 
 
 # --------------------------------------------------------------------------
+
+def _clean_watch(items: Any, target: Any) -> list[dict[str, str]]:
+    """Up to two extra objects to track during a step: hazards to keep clear
+    of and the tool to use. Each one costs a SAM call per changed frame."""
+    out: list[dict[str, str]] = []
+    seen = {str(target or "").strip().lower()}
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        phrase = " ".join(str(it.get("phrase") or "").split())[:60]
+        role = str(it.get("role") or "").lower()
+        if phrase and role in ("hazard", "tool") and phrase.lower() not in seen:
+            seen.add(phrase.lower())
+            out.append({"phrase": phrase, "role": role})
+        if len(out) == 2:
+            break
+    return out
+
 
 def _clean_reading(r: Any) -> dict[str, Any] | None:
     """{'what','unit','min','max'} with numeric bounds, or None if unusable."""
@@ -344,6 +423,7 @@ def _normalise(data: Any, *, n_frames: int = 0) -> dict[str, Any]:
                 "check": check,
                 "reading": reading if check == "reading" else None,
                 "duration_s": duration if check == "timed" else None,
+                "watch_for": _clean_watch(raw.get("watch_for"), raw.get("target_phrase")),
                 "common_mistake": raw.get("common_mistake") or None,
                 "hazard": raw.get("hazard") or None,
             }

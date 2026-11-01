@@ -11,7 +11,7 @@ import struct
 import pytest
 from fastapi.testclient import TestClient
 
-from backend import live, procedures, sam_parse
+from backend import guide, live, procedures, sam_parse
 from backend.realtime import intent_of
 
 FRAME = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8fakejpeg").decode()
@@ -99,6 +99,9 @@ def ctx(tmp_path, monkeypatch):
         return dict(_action(plan["tool"]))
 
     monkeypatch.setattr(guide, "ground", fake_ground)
+    monkeypatch.setattr(guide, "ground_scene",
+                        lambda step, frame: {"target": fake_ground(step, frame), "objects": [], "hands": []})
+    monkeypatch.setattr(guide, "left_behind", lambda proc, frame: None)
     monkeypatch.setattr(guide, "judge_step", fake_judge)
     from backend.main import app
     return TestClient(app), pid, calls, plan, db
@@ -423,3 +426,78 @@ def test_worker_speech_is_quoted_as_data():
     q = _quote(said)
     assert "\n" not in q and '"' not in q and "{" not in q and "[" not in q
     assert len(q) <= 120
+
+
+# ---------------------------------------------------------------- scene: hazards, tools, hands
+
+def _box(x1, y1, x2, y2, conf=0.9):
+    return sam_parse.Detection(frame=0, ordinal=0, x1=x1, y1=y1, x2=x2, y2=y2, img_w=1000, img_h=1000,
+                               confidence=conf)
+
+
+def test_hand_near_hazard_geometry():
+    from backend.guide import hand_near
+    blade = [_box(400, 400, 600, 600)]
+    assert hand_near([_box(450, 450, 500, 500)], blade)           # hand on the blade
+    assert hand_near([_box(610, 450, 700, 500)], blade)           # within the 6% margin
+    assert not hand_near([_box(100, 100, 200, 200)], blade)       # well clear
+    assert not hand_near([], blade)
+
+
+def test_hand_near_hazard_is_spoken_live(ctx, monkeypatch):
+    client, pid, calls, plan, db = ctx
+    from backend import guide
+    plan["tool"] = "request_better_view"
+    monkeypatch.setattr(guide, "ground_scene", lambda step, frame: {
+        "target": [_box(100, 100, 200, 200)],
+        "objects": [{"role": "hazard", "label": "rotating blade", "detections": [_box(400, 400, 600, 600)]},
+                    {"role": "tool", "label": "torque wrench", "detections": [_box(700, 700, 800, 800)]}],
+        "hands": [_box(450, 450, 520, 520)],
+    })
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "watch", "data": FRAME})
+        track = _until(ws, "track")
+        roles = sorted(o["role"] for o in track["objects"])
+        assert roles == ["hazard", "tool"]
+        assert _until(ws, "proximity")["hazard"] == "rotating blade"
+        warn = _until(ws, "speak")
+        assert "Keep clear" in warn["text"]
+        ws.send_json({"type": "abort"})
+
+
+def test_left_behind_tool_is_flagged_at_the_end(ctx, monkeypatch):
+    client, pid, calls, plan, db = ctx
+    from backend import guide
+    monkeypatch.setattr(guide, "judge_step", lambda *a, **k: _verify(completed_through=2))
+    monkeypatch.setattr(guide, "left_behind", lambda proc, frame: "torque wrench")
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "check", "data": FRAME, "said": "done"})
+        assert "torque wrench" in _until(ws, "hazard")["message"]
+        _until(ws, "complete")
+    events = db.session_log(db.list_sessions()[0]["id"])["events"]
+    assert any(e["verdict"] == "notice" and "torque wrench" in e["reason"] for e in events)
+
+
+def test_normalise_watch_for_is_capped_and_clean():
+    out = procedures._normalise({"title": "T", "steps": [{
+        "instruction": "Change the blade", "target_phrase": "blade bolt",
+        "watch_for": [{"phrase": "rotating blade", "role": "hazard"}, {"phrase": "blade bolt", "role": "tool"},
+                      {"phrase": "torque wrench", "role": "tool"}, {"phrase": "hot plate", "role": "hazard"},
+                      {"phrase": "x", "role": "nonsense"}]}]}, n_frames=1)
+    w = out["steps"][0]["watch_for"]
+    assert w == [{"phrase": "rotating blade", "role": "hazard"}, {"phrase": "torque wrench", "role": "tool"}]
+
+
+def test_untrackable_watch_items_are_not_grounded(monkeypatch):
+    asked = []
+    monkeypatch.setattr(guide.meta_client, "segment", lambda phrase, frame: asked.append(phrase) or [])
+    step = {"target_phrase": "red stop button",
+            "watch_for": [{"phrase": "saw blade", "role": "hazard", "trackable": False},
+                          {"phrase": "spanner", "role": "tool"}]}
+    guide.ground_scene(step, b"jpeg")
+    # The unfindable hazard costs no SAM call, and with no live hazard there is no hand search.
+    assert sorted(asked) == ["red stop button", "spanner"]

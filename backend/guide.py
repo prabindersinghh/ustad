@@ -169,6 +169,92 @@ def parse_reading(text: Any) -> float | None:
     return float(m.group(0)) if m else None
 
 
+def ground_scene(step: dict[str, Any], frame: bytes) -> dict[str, Any]:
+    """Ground everything that matters in this step's view, in parallel.
+
+    Returns the target's detections, each watched object (hazards to keep
+    clear of, the tool to use), and the operator's hands when a hazard is
+    being watched, so the server can warn the moment a hand gets close.
+    One SAM call per phrase; all run at once, so the wait is one round trip.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Items the capture self-check couldn't find are not tracked live: they'd
+    # cost a SAM call per frame and never show up.
+    watch = [w for w in (step.get("watch_for") or []) if w.get("phrase") and w.get("trackable", True)]
+    jobs: list[tuple[str, str, str]] = []           # (kind, label, phrase)
+    if step.get("target_phrase"):
+        jobs.append(("target", step["target_phrase"], step["target_phrase"]))
+    for w in watch:
+        jobs.append((w["role"], w["phrase"], w["phrase"]))
+    if any(w["role"] == "hazard" for w in watch):
+        jobs.append(("hand", "hand", "human hand"))
+
+    def run(job: tuple[str, str, str]) -> list[sam_parse.Detection]:
+        try:
+            return meta_client.segment(job[2], frame)
+        except Exception as exc:  # noqa: BLE001 - one missed object must not kill the view
+            log.warning("Grounding failed for %r: %s", job[2], exc)
+            return []
+
+    with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as pool:
+        results = list(pool.map(run, jobs))
+
+    scene: dict[str, Any] = {"target": [], "objects": [], "hands": []}
+    for (kind, label, _), dets in zip(jobs, results):
+        if kind == "target":
+            scene["target"] = dets
+        elif kind == "hand":
+            scene["hands"] = dets
+        else:
+            scene["objects"].append({"role": kind, "label": label, "detections": dets})
+    return scene
+
+
+def left_behind(proc: dict[str, Any], frame: bytes) -> str | None:
+    """The name of a tool still in view at the end of the job, else None.
+
+    Checks the tools this procedure uses (from its steps' watch_for), or any
+    hand tool if none are listed. A confident detection only: a false alarm
+    here is cheap, but it should still be rare.
+    """
+    tools = list(dict.fromkeys(
+        w["phrase"] for s in proc.get("steps", []) for w in (s.get("watch_for") or [])
+        if w.get("role") == "tool" and w.get("phrase")))[:3] or ["hand tool"]
+    for phrase in tools:
+        try:
+            dets = meta_client.segment(phrase, frame)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("left-behind check failed for %r: %s", phrase, exc)
+            continue
+        if any((d.confidence or 0) >= 0.6 for d in dets):
+            return phrase
+    return None
+
+
+def scene_summary(scene: dict[str, Any]) -> str:
+    """Extra grounding lines for the judge: hazards and tools it can see."""
+    lines = []
+    for o in scene.get("objects", []):
+        what = "hazard to keep clear of" if o["role"] == "hazard" else "tool for this step"
+        lines.append(f"Also watched ({what}): {sam_parse.summarise(o['label'], o['detections'])}")
+    return "\n".join(lines)
+
+
+def hand_near(hands: list[sam_parse.Detection], hazards: list[sam_parse.Detection],
+              margin: float = 0.06) -> bool:
+    """True when any hand box overlaps a hazard box grown by `margin`
+    (a fraction of the frame). Boxes come from the same frame."""
+    for h in hands:
+        for z in hazards:
+            if not (z.img_w and z.img_h):
+                continue
+            mx, my = margin * z.img_w, margin * z.img_h
+            if (h.x1 < z.x2 + mx and h.x2 > z.x1 - mx and h.y1 < z.y2 + my and h.y2 > z.y1 - my):
+                return True
+    return False
+
+
 def ground(step: dict[str, Any], frame: bytes) -> list[sam_parse.Detection]:
     """SAM 3.1 on the step's target phrase. Empty list when not found or on error."""
     phrase = step.get("target_phrase") or step.get("title") or ""
@@ -190,6 +276,7 @@ def judge_step(
     detections: list[sam_parse.Detection] | None = None,
     upcoming: list[dict[str, Any]] | None = None,
     effort: str | None = None,
+    context: str = "",
 ) -> dict[str, Any]:
     """Perception + decision for one step, with NO persistence.
 
@@ -212,6 +299,8 @@ def judge_step(
     if detections is None:
         detections = ground(step, frame)
     grounding = sam_parse.summarise(phrase, detections) if phrase else "Grounding: skipped."
+    if context:
+        grounding += "\n" + context
 
     # --- decision ---------------------------------------------------------
     spec = reading_spec(step)

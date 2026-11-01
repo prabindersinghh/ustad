@@ -230,6 +230,7 @@ async function showProcedure(id){
         <div class="kv"><b>Target phrase:</b> <code>${esc(s.target_phrase||'n/a')}</code></div>
         <div class="kv"><b>Success criteria:</b> ${esc(s.success_criteria||'n/a')}</div>
         ${s.reading?`<div class="kv"><b>Required reading:</b> ${esc(specOf(s.reading))}</div>`:''}
+        ${(s.watch_for||[]).length?`<div class="kv"><b>Watched live:</b> ${s.watch_for.map((w)=>`<span class="pill ${w.role==='hazard'?'bad':'ok'}">${w.role==='hazard'?'Keep clear':'Tool'}: ${esc(w.phrase)}${w.trackable===false?' (not trackable on camera)':''}</span>`).join(' ')}</div>`:''}
         ${s.common_mistake?`<div class="kv"><b>Common mistake:</b> ${esc(s.common_mistake)}</div>`:''}
         ${s.hazard?`<div class="kv"><b>Hazard:</b> ${esc(s.hazard)}</div>`:''}
         ${st?`<div class="kv stepstat">${Math.round((st.first_try_rate||0)*100)}% right first time · ${st.caught} caught${st.inferred?` · ${st.inferred} inferred`:''}${st.skipped?` · ${st.skipped} skipped`:''}${st.median_s!=null?` · ${st.median_s} s median`:''}</div>`:''}
@@ -283,7 +284,7 @@ async function showSession(id){
     html += `<div class="step ${esc(e.verdict)}">
       <div>
         <div class="h">Step ${e.step_index+1}
-          <span class="pill ${({pass:'ok',confirmed:'ok',fail:'bad',inferred:'kind'})[e.verdict]||'warn'}">${esc(e.verdict)}${conf}</span>
+          <span class="pill ${({pass:'ok',confirmed:'ok',fail:'bad',inferred:'kind',notice:'bad'})[e.verdict]||'warn'}">${esc(e.verdict)}${conf}</span>
           ${e.backend?`<span class="pill backend">${esc(e.backend)}</span>`:''}
           ${e.latency_ms?`<span class="muted" style="font-size:12px">${e.latency_ms}ms</span>`:''}
         </div>

@@ -694,7 +694,7 @@ const Guide = {
         break;
 
       case 'track':
-        LiveBox.update(msg.detections || [], msg.target);
+        LiveBox.update(msg.detections || [], msg.target, msg.objects);
         break;
 
       case 'heard':
@@ -716,6 +716,11 @@ const Guide = {
 
       case 'hazard':
         this.hazard(msg.message);
+        break;
+
+      case 'proximity':
+        LiveBox.danger(msg.hazard);
+        this.hazard(`Hand near the ${msg.hazard}. Keep clear.`);
         break;
 
       case 'pulse':
@@ -839,27 +844,45 @@ const Guide = {
 
 /* ------------------------------------------------------------ live box */
 
-/* Draws the step's target on top of the camera like an AR marker: corner
- * brackets and a label, eased toward each new SAM grounding so it reads as
- * tracking rather than flicker, fading out when the target is lost. */
+/* Draws what matters in the operator's view like AR markers, each eased
+ * toward its latest SAM grounding so it reads as tracking, not flicker:
+ *   target  blue corner brackets, the part to work on
+ *   hazard  red dashed zone, "Keep clear", flashing when a hand gets close
+ *   tool    green brackets, the tool this step needs */
+const STYLE = {
+  target: { color: '#3b82ff', prefix: '' },
+  hazard: { color: '#ff4d52', prefix: 'Keep clear: ' },
+  tool: { color: '#12d98a', prefix: 'Tool: ' },
+};
+
 const LiveBox = {
-  dets: [], target: '', at: 0, cur: null, alpha: 0, raf: 0,
-  flashColor: null, flashUntil: 0, pulseAt: 0,
+  tracks: {}, target: '', raf: 0,
+  flashColor: null, flashUntil: 0, pulseAt: 0, dangerUntil: 0, dangerLabel: '',
 
   start() { if (!this.raf) this.loop(); },
   stop() {
     cancelAnimationFrame(this.raf); this.raf = 0;
-    this.dets = []; this.cur = null; this.alpha = 0;
+    this.tracks = {};
     const c = $('guide-overlay');
     if (c && c.getContext) c.getContext('2d').clearRect(0, 0, c.width, c.height);
   },
-  reset(target) { this.dets = []; this.cur = null; this.alpha = 0; this.target = target || ''; },
-  update(dets, target) { this.dets = dets; if (target) this.target = target; this.at = performance.now(); },
+  reset(target) { this.tracks = {}; this.target = target || ''; },
+  update(dets, target, objects) {
+    const now = performance.now();
+    if (target) this.target = target;
+    const feed = (key, role, label, d) => {
+      const t = this.tracks[key] || (this.tracks[key] = { role, label, cur: null, alpha: 0 });
+      t.dets = d || []; t.at = now; t.label = label;
+    };
+    feed('target', 'target', this.target, dets);
+    (objects || []).forEach((o) => feed(o.role + ':' + o.label, o.role, o.label, o.detections));
+  },
   flash(verdict) {
     this.flashColor = verdict === 'pass' ? '#12d98a' : verdict === 'fail' ? '#ff5a5f' : '#ffb020';
     this.flashUntil = performance.now() + 900;
   },
   pulse() { this.pulseAt = performance.now(); },
+  danger(label) { this.dangerLabel = label; this.dangerUntil = performance.now() + 2500; },
 
   loop() {
     this.raf = requestAnimationFrame(() => this.loop());
@@ -875,70 +898,86 @@ const LiveBox = {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
+    // Video is object-fit:cover, so replicate the crop maths.
+    const vr = video.videoWidth / video.videoHeight, cr = W / H;
+    let dw, dh, ox, oy;
+    if (vr > cr) { dh = H; dw = dh * vr; ox = (W - dw) / 2; oy = 0; }
+    else { dw = W; dh = dw / vr; ox = 0; oy = (H - dh) / 2; }
     const now = performance.now();
-    const best = this.dets.length
-      ? this.dets.reduce((a, b) => ((b.confidence || 0) > (a.confidence || 0) ? b : a))
-      : null;
-    const stale = now - this.at > 3000;
-    const wantAlpha = best && !stale ? 1 : 0;
-    this.alpha += (wantAlpha - this.alpha) * 0.12;
-    if (this.alpha < 0.02 && !best) return;
 
-    if (best) {
-      // Video is object-fit:cover, so replicate the crop maths.
-      const vr = video.videoWidth / video.videoHeight;
-      const cr = W / H;
-      let dw, dh, ox, oy;
-      if (vr > cr) { dh = H; dw = dh * vr; ox = (W - dw) / 2; oy = 0; }
-      else { dw = W; dh = dw / vr; ox = 0; oy = (H - dh) / 2; }
-      const r = {
-        x: ox + (best.x1 / best.img_w) * dw, y: oy + (best.y1 / best.img_h) * dh,
-        w: ((best.x2 - best.x1) / best.img_w) * dw, h: ((best.y2 - best.y1) / best.img_h) * dh,
-      };
-      if (!this.cur) this.cur = r;
-      else for (const k of ['x', 'y', 'w', 'h']) this.cur[k] += (r[k] - this.cur[k]) * 0.22;
-    }
-    if (!this.cur) return;
-
-    const { x, y, w, h } = this.cur;
-    const color = now < this.flashUntil ? this.flashColor : '#3b82ff';
-    ctx.globalAlpha = this.alpha;
-
-    ctx.fillStyle = color + '1f';
-    roundRect(ctx, x, y, w, h, 10); ctx.fill();
-
-    const L = Math.max(14, Math.min(w, h) * 0.26);
-    ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round';
-    ctx.shadowColor = color; ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.moveTo(x, y + L); ctx.lineTo(x, y); ctx.lineTo(x + L, y);
-    ctx.moveTo(x + w - L, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + L);
-    ctx.moveTo(x + w, y + h - L); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - L, y + h);
-    ctx.moveTo(x + L, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - L);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    const since = now - this.pulseAt;
-    if (since < 1400) {
-      const k = since / 1400;
-      ctx.globalAlpha = this.alpha * (1 - k);
-      ctx.lineWidth = 3;
-      roundRect(ctx, x - 14 * k * 2, y - 14 * k * 2, w + 56 * k, h + 56 * k, 14); ctx.stroke();
-      ctx.globalAlpha = this.alpha;
-    }
-
-    if (this.target) {
-      const label = this.target;
-      ctx.font = '600 14px Figtree, -apple-system, sans-serif';
-      const tw = ctx.measureText(label).width;
-      const lx = Math.max(6, Math.min(x, W - tw - 30));
-      const ly = y > 34 ? y - 34 : y + h + 8;
-      ctx.fillStyle = color;
-      roundRect(ctx, lx, ly, tw + 24, 26, 13); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillText(label, lx + 12, ly + 18);
-    }
+    // hazards first, then tools, then the target on top
+    const order = { hazard: 0, tool: 1, target: 2 };
+    Object.values(this.tracks).sort((a, b) => order[a.role] - order[b.role]).forEach((t) => {
+      const best = (t.dets || []).length
+        ? t.dets.reduce((a, b) => ((b.confidence || 0) > (a.confidence || 0) ? b : a)) : null;
+      const want = best && now - t.at < 3000 ? 1 : 0;
+      t.alpha += (want - t.alpha) * 0.12;
+      if (best) {
+        const r = {
+          x: ox + (best.x1 / best.img_w) * dw, y: oy + (best.y1 / best.img_h) * dh,
+          w: ((best.x2 - best.x1) / best.img_w) * dw, h: ((best.y2 - best.y1) / best.img_h) * dh,
+        };
+        if (!t.cur) t.cur = r;
+        else for (const k of ['x', 'y', 'w', 'h']) t.cur[k] += (r[k] - t.cur[k]) * 0.22;
+      }
+      if (!t.cur || t.alpha < 0.02) return;
+      this.draw(ctx, t, now, W);
+    });
     ctx.globalAlpha = 1;
+  },
+
+  draw(ctx, t, now, W) {
+    const { x, y, w, h } = t.cur;
+    const style = STYLE[t.role] || STYLE.target;
+    let color = style.color;
+    if (t.role === 'target' && now < this.flashUntil) color = this.flashColor;
+    const alarm = t.role === 'hazard' && now < this.dangerUntil && t.label === this.dangerLabel;
+    ctx.globalAlpha = t.alpha * (alarm ? 0.55 + 0.45 * Math.abs(Math.sin(now / 120)) : 1);
+
+    ctx.fillStyle = color + (t.role === 'hazard' ? (alarm ? '55' : '22') : '1f');
+    roundRect(ctx, x, y, w, h, 10); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineCap = 'round';
+    if (t.role === 'hazard') {
+      ctx.lineWidth = alarm ? 4 : 2.5;
+      ctx.setLineDash([9, 7]);
+      roundRect(ctx, x, y, w, h, 10); ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      const L = Math.max(12, Math.min(w, h) * (t.role === 'tool' ? 0.2 : 0.26));
+      ctx.lineWidth = t.role === 'tool' ? 3 : 4;
+      ctx.shadowColor = color; ctx.shadowBlur = t.role === 'target' ? 12 : 6;
+      ctx.beginPath();
+      ctx.moveTo(x, y + L); ctx.lineTo(x, y); ctx.lineTo(x + L, y);
+      ctx.moveTo(x + w - L, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + L);
+      ctx.moveTo(x + w, y + h - L); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w - L, y + h);
+      ctx.moveTo(x + L, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + h - L);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    if (t.role === 'target') {
+      const since = now - this.pulseAt;
+      if (since < 1400) {
+        const k = since / 1400;
+        ctx.globalAlpha = t.alpha * (1 - k);
+        ctx.lineWidth = 3;
+        roundRect(ctx, x - 28 * k, y - 28 * k, w + 56 * k, h + 56 * k, 14); ctx.stroke();
+        ctx.globalAlpha = t.alpha;
+      }
+    }
+
+    const label = style.prefix + (t.label || '');
+    if (label.trim()) {
+      ctx.font = `600 ${t.role === 'target' ? 14 : 12.5}px Figtree, -apple-system, sans-serif`;
+      const tw = ctx.measureText(label).width;
+      const lh = t.role === 'target' ? 26 : 22;
+      const lx = Math.max(6, Math.min(x, W - tw - 30));
+      const ly = y > lh + 8 ? y - lh - 8 : y + h + 8;
+      ctx.fillStyle = color;
+      roundRect(ctx, lx, ly, tw + 22, lh, lh / 2); ctx.fill();
+      ctx.fillStyle = t.role === 'tool' ? '#052414' : '#fff';
+      ctx.fillText(label, lx + 11, ly + lh * 0.68);
+    }
   },
 };
 

@@ -84,6 +84,7 @@ class _Grounding:
     at: float                               # when the frame was captured
     detections: list[sam_parse.Detection]
     seen: float = 0.0                       # last time the view was known unchanged
+    context: str = ""                       # hazards/tools also seen, for the judge
 
     def __post_init__(self) -> None:
         self.seen = self.seen or self.at
@@ -368,25 +369,40 @@ class GuideSession:
                 t.cancel()
 
     async def _ground(self, gen0: int, step: dict[str, Any], frame: bytes, frame_at: float) -> None:
-        dets = await asyncio.to_thread(guide.ground, step, frame)
+        scene = await asyncio.to_thread(guide.ground_scene, step, frame)
         if gen0 != self.gen:
             return
         # Results can land out of order with two in flight: keep the newest.
         if self.grounding and self.grounding.gen == gen0 and self.grounding.at >= frame_at:
             return
-        self.grounding = _Grounding(gen0, frame, frame_at, dets)
+        dets = scene["target"]
+        self.grounding = _Grounding(gen0, frame, frame_at, dets, context=guide.scene_summary(scene))
         await self.out.send({
             "type": "track", "step": self.idx + 1,
             "target": step.get("target_phrase", ""),
             "detections": [d.to_dict() for d in dets],
+            "objects": [{"role": o["role"], "label": o["label"],
+                         "detections": [d.to_dict() for d in o["detections"]]} for o in scene["objects"]],
         })
+        # Live safety: a hand inside (or just outside) a hazard's box is
+        # warned about at once, not when the operator next says "done".
+        for o in scene["objects"]:
+            if o["role"] == "hazard" and guide.hand_near(scene["hands"], o["detections"]):
+                now = time.monotonic()
+                if now - getattr(self, "_proximity_at", 0.0) > 6:
+                    self._proximity_at = now
+                    log.warning("hand near %r on step %d", o["label"], self.idx + 1)
+                    await self.out.send({"type": "proximity", "hazard": o["label"]})
+                    await self.speak(f"Hand near the {o['label']}. Keep clear.",
+                                     step=self.idx + 1, of=len(self.proc["steps"]))
+                break
 
     async def _background_judge(self, g: _Grounding) -> None:
         gen0, step, attempt = g.gen, self.step, self.attempt
         self.last_judged_at = g.at
         try:
             action = await asyncio.to_thread(
-                guide.judge_step, step, g.frame, attempt=attempt, detections=g.detections,
+                guide.judge_step, step, g.frame, attempt=attempt, detections=g.detections, context=g.context,
                 worker_said="(nothing; this is a background look while they work)",
                 upcoming=self._upcoming(), effort=config.WATCH_EFFORT,
             )
@@ -450,20 +466,20 @@ class GuideSession:
                     await self._finish(action, self.latest[0] if self.latest else b"", source=source)
                     return
 
-                dets = None
+                dets, ctx = None, ""
                 g = self.grounding
                 if frame is None:
                     # Prefer the frame we already grounded if it's fresh: the
                     # decision is then the only model call on the hot path.
                     if g and g.gen == gen0 and t0 - g.seen <= config.GROUNDING_FRESH_S:
-                        frame, dets = g.frame, g.detections
+                        frame, dets, ctx = g.frame, g.detections, g.context
                     elif self.latest:
                         frame = self.latest[0]
                 if frame is None:
                     await self.out.send({"type": "error", "message": "No camera view yet. Point the camera at the work."})
                     return
                 action = await asyncio.to_thread(
-                    guide.judge_step, step, frame, worker_said=said, attempt=self.attempt, detections=dets,
+                    guide.judge_step, step, frame, worker_said=said, attempt=self.attempt, detections=dets, context=ctx,
                     upcoming=self._upcoming(),
                 )
                 if gen0 != self.gen:
@@ -570,6 +586,17 @@ class GuideSession:
             outcome = "completed_with_skips"
             summary = (f"Done, but step{'s' if len(self.skipped) > 1 else ''} "
                        f"{', '.join(str(i + 1) for i in self.skipped)} were skipped and can't be confirmed.")
+
+        # Nothing left behind: a spanner left inside a guard is a classic,
+        # costly incident. Look for this job's tools (or any hand tool) in the
+        # final view before the machine goes back into service.
+        if frame:
+            left = await asyncio.to_thread(guide.left_behind, self.proc, frame)
+            if left:
+                db.log_step_event(self.session_id, len(self.proc["steps"]) - 1, "notice",
+                                  reason=f"[left behind] {left} still in the work area at the end of the job")
+                await self.out.send({"type": "hazard", "message": f"{left} still in the work area"})
+                summary = f"Before you restart: the {left} is still in the work area. " + summary
         db.finish_session(self.session_id, outcome)
         await self.out.send({"type": "complete", "session_id": self.session_id})
         await self.speak(summary)
