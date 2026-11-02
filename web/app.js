@@ -74,6 +74,14 @@ const Voice = {
 const MediaSource_ = {
   stream: null,
   async start(videoEl, { audio = false } = {}) {
+    // iOS gives the camera to one capture at a time; a leftover stream from a
+    // previous screen would mute the new one.
+    if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const err = new Error('This browser does not allow camera access. Open the link in Safari.');
+      err.name = 'InAppBrowser';
+      throw err;
+    }
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
       audio: audio ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true } : false,
@@ -81,7 +89,28 @@ const MediaSource_ = {
     videoEl.srcObject = this.stream;
     await videoEl.play().catch(() => {});
     await WakeLock.acquire();
+    // iOS takes the camera away without an error: another tab grabbing it, a
+    // call, Siri, the screen locking. The track says so; the screen should too.
+    const track = this.stream.getVideoTracks()[0];
+    if (track) {
+      track.onended = () => this.onlost && this.onlost('ended');
+      track.onmute = () => this.onlost && this.onlost('muted');
+      track.onunmute = () => this.onlost && this.onlost('back');
+    }
     return this.stream;
+  },
+  onlost: null,
+  /* True when the picture is effectively black: a muted iOS camera still
+   * hands the page frames, they are just empty. */
+  isDark(videoEl) {
+    const c = this._probe || (this._probe = document.createElement('canvas'));
+    c.width = 16; c.height = 12;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(videoEl, 0, 0, 16, 12);
+    const px = g.getImageData(0, 0, 16, 12).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+    return sum / (px.length / 4) / 3 < 8;
   },
   stop() {
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
@@ -92,6 +121,10 @@ const MediaSource_ = {
   grab(videoEl, width = FRAME_WIDTH, quality = JPEG_QUALITY) {
     const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
     if (!vw || !vh) return null;
+    // Never send a black frame: it builds a procedure about "a black screen"
+    // and costs a SAM call that can't find anything.
+    this.dark = this.isDark(videoEl);
+    if (this.dark) return null;
     const w = Math.min(width, vw);
     const h = Math.round((vh / vw) * w);
     const c = document.createElement('canvas');
@@ -122,15 +155,31 @@ const Mic = {
   ctx: null, src: null, node: null, sink: null, onchunk: null,
   CHUNK: 1600,
 
+  /* iOS only lets an AudioContext run if it was created or resumed inside the
+   * tap itself. By the time the countdown and socket are done that tap is long
+   * gone, and the context sits suspended streaming nothing. So the tap handlers
+   * call this first, synchronously, and start() reuses the unlocked context. */
+  prime() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!this.ctx || this.ctx.state === 'closed') this.ctx = new AC();
+    this.ctx.resume().catch(() => {});
+  },
+
   async start(stream, onchunk, onlevel) {
-    this.stop();
+    this.disconnect();
     const track = stream && stream.getAudioTracks()[0];
     if (!track) throw new Error('no microphone track');
     this.onchunk = onchunk;
     this.onlevel = onlevel || null;
     const AC = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AC();
-    await this.ctx.resume();
+    if (!this.ctx || this.ctx.state === 'closed') this.ctx = new AC();
+    // resume() outside a gesture can hang on iOS rather than reject.
+    await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, 800))]);
+    if (this.ctx.state !== 'running') {
+      this.stop();
+      throw new Error('audio suspended');     // caller falls back to MediaRecorder
+    }
     this.src = this.ctx.createMediaStreamSource(new MediaStream([track]));
     this.sink = this.ctx.createGain();
     this.sink.gain.value = 0;                 // keep the graph pulling, play nothing
@@ -175,13 +224,19 @@ const Mic = {
     this.node.connect(this.sink);
   },
 
-  stop() {
+  disconnect() {
     try { this.src && this.src.disconnect(); } catch (_) {}
     try { this.node && this.node.disconnect(); } catch (_) {}
-    if (this.ctx) this.ctx.close().catch(() => {});
-    this.ctx = this.src = this.node = this.sink = null;
+    try { this.sink && this.sink.disconnect(); } catch (_) {}
+    this.src = this.node = this.sink = null;
     this.onchunk = null;
     this.onlevel = null;
+  },
+
+  stop() {
+    this.disconnect();
+    if (this.ctx) this.ctx.close().catch(() => {});
+    this.ctx = null;
   },
 };
 
@@ -209,6 +264,7 @@ const Capture = {
       showCameraError(wrap, err, () => this.open());
       return;
     }
+    MediaSource_.onlost = (why) => cameraLost(wrap, why, () => (this.recording ? this.restartCamera() : this.open()));
     this.resetButton();
     this.clearDrafts();
     this.setState('ready', 'ready');
@@ -219,6 +275,20 @@ const Capture = {
     $('cap-btn').onclick = () => (this.recording ? this.stop() : this.start());
     $('cap-pause').onclick = () => (this.paused ? this.resume() : this.pause());
     $('cap-mark').onclick = () => this.mark();
+  },
+
+  /* The camera dropped mid-take: get it back without losing the recording. */
+  async restartCamera() {
+    const wrap = $('cap-video').closest('.camera-wrap');
+    Mic.prime();
+    try {
+      await MediaSource_.start($('cap-video'), { audio: true });
+      clearCameraError(wrap);
+      if (this.streamingMic && this.micArgs) await Mic.start(MediaSource_.stream, ...this.micArgs);
+      $('cap-status').textContent = 'Camera back. Still recording.';
+    } catch (err) {
+      showCameraError(wrap, err, () => this.restartCamera());
+    }
   },
 
   /* ---- clock ---------------------------------------------------------- */
@@ -254,6 +324,7 @@ const Capture = {
     // One tap, one socket: a second tap while connecting used to open a second
     // capture socket and split the frames from the stop message.
     if (this.connecting || this.recording) return;
+    Mic.prime();                                // must run inside the tap, before any await
     this.connecting = true;
     $('cap-btn').disabled = true;
 
@@ -300,9 +371,11 @@ const Capture = {
 
       // Narration streams live: captions and step cards appear as you talk.
       try {
-        await Mic.start(MediaSource_.stream,
+        this.micArgs = [
           (buf) => { if (!this.paused && this.ws && this.ws.readyState === 1) this.ws.send(buf); },
-          (level) => { $('cap-level').style.width = (this.paused ? 0 : Math.round(level * 100)) + '%'; });
+          (level) => { $('cap-level').style.width = (this.paused ? 0 : Math.round(level * 100)) + '%'; },
+        ];
+        await Mic.start(MediaSource_.stream, ...this.micArgs);
         this.streamingMic = true;
       } catch (err) {
         // Fall back to recording the narration and uploading it at the end.
@@ -394,6 +467,11 @@ const Capture = {
     const data = MediaSource_.grab($('cap-video'));
     if (data && this.ws && this.ws.readyState === 1) {
       this.ws.send(JSON.stringify({ type: 'frame', data }));
+    }
+    this.darkStreak = MediaSource_.dark ? (this.darkStreak || 0) + 1 : 0;
+    if (this.darkStreak === 2) {
+      $('cap-status').textContent =
+        'No picture from the camera. Check nothing covers the lens and close other tabs using the camera.';
     }
   },
 
@@ -545,6 +623,7 @@ const Guide = {
   MAX_RETRIES: 6,
 
   async open(procedureId) {
+    Mic.prime();                                // inside the tap that opened the job
     show('guide');
     this.procedureId = procedureId;
     this.sessionId = null;
@@ -562,6 +641,7 @@ const Guide = {
       showCameraError(wrap, err, () => this.open(this.procedureId));
       return;
     }
+    MediaSource_.onlost = (why) => cameraLost(wrap, why, () => this.restartCamera());
 
     $('guide-done').onclick = () => this.check();
     $('guide-repeat').onclick = () => this.send({ type: 'repeat' });
@@ -590,9 +670,7 @@ const Guide = {
 
       // Hands-free: the mic streams to the server, which listens for commands.
       try {
-        await Mic.start(MediaSource_.stream, (buf) => {
-          if (this.ws && this.ws.readyState === 1) this.ws.send(buf);
-        });
+        await Mic.start(MediaSource_.stream, this.micSend);
         $('guide-hints').classList.add('on');
       } catch (_) {
         $('guide-hints').classList.remove('on');
@@ -602,9 +680,27 @@ const Guide = {
     this.ws.onerror = () => {};  // onclose drives reconnect
     this.ws.onclose = () => {
       clearInterval(this.watchTimer);
-      Mic.stop();
+      // Keep the unlocked audio context: a reconnect has no tap to unlock a new one.
+      Mic.disconnect();
       if (!this.closing) this.scheduleReconnect();
     };
+  },
+
+  micSend(buf) {
+    if (Guide.ws && Guide.ws.readyState === 1) Guide.ws.send(buf);
+  },
+
+  /* The camera dropped mid-job: get it back and carry on from the same step. */
+  async restartCamera() {
+    const wrap = $('guide-video').closest('.camera-wrap');
+    Mic.prime();
+    try {
+      await MediaSource_.start($('guide-video'), { audio: true });
+      clearCameraError(wrap);
+      if (this.ws && this.ws.readyState === 1) await Mic.start(MediaSource_.stream, this.micSend).catch(() => {});
+    } catch (err) {
+      showCameraError(wrap, err, () => this.restartCamera());
+    }
   },
 
   /* Send the live view only when it changed. Grounding a frame costs a SAM
@@ -815,7 +911,10 @@ const Guide = {
     const msg = { type: 'check', said: 'done' };
     if (!this.haveView) {
       const data = MediaSource_.grab($('guide-video'));
-      if (!data) return;
+      if (!data) {
+        if (MediaSource_.dark) this.toast('No picture from the camera. Check the lens is clear.');
+        return;
+      }
       msg.data = data;
     }
     this.send(msg);
@@ -1059,6 +1158,17 @@ function escapeHtml(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/* The live camera went away mid-screen. A mute is often brief (a notification,
+ * Control Center), so give it a moment before covering the view; an ended
+ * track never comes back on its own, so offer the retry straight away. */
+function cameraLost(wrapEl, why, retry) {
+  clearTimeout(cameraLost.timer);
+  if (why === 'back') { clearCameraError(wrapEl); return; }
+  const lost = { name: 'CameraLost' };
+  if (why === 'ended') { showCameraError(wrapEl, lost, retry); return; }
+  cameraLost.timer = setTimeout(() => showCameraError(wrapEl, lost, retry), 1500);
+}
+
 /* Clean, actionable overlay when the camera/mic is unavailable or denied.
  * iOS silently keeps a denial until the site's data is cleared, so the message
  * has to tell the worker exactly where to go rather than just failing. */
@@ -1067,12 +1177,18 @@ function showCameraError(wrapEl, err, retry) {
   clearCameraError(wrapEl);
   const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
   const missing = err && (err.name === 'NotFoundError' || err.name === 'OverconstrainedError');
+  const busy = err && (err.name === 'NotReadableError' || err.name === 'AbortError' || err.name === 'CameraLost');
+  const inApp = err && err.name === 'InAppBrowser';
   const title = denied ? 'Camera and microphone are blocked'
     : missing ? 'No camera found'
+    : busy ? 'The camera was taken away'
+    : inApp ? 'Open this in Safari'
     : 'Could not start the camera';
   const help = denied
-    ? 'Ustad needs the camera to check your work. Enable it in Settings, Safari, Camera, then reload.'
+    ? 'Ustad needs the camera to check your work. Tap aA in the address bar, Website Settings, set Camera and Microphone to Allow, then retry.'
     : missing ? 'This device did not expose a camera to the browser.'
+    : busy ? 'Another tab or app is using the camera, or a call interrupted it. Close other tabs with Ustad open, then retry.'
+    : inApp ? 'Apps like WhatsApp and Gmail open links in a browser that cannot use the camera. Tap the menu and choose Open in Safari.'
     : (err && err.message) || 'Unknown error.';
   const el = document.createElement('div');
   el.className = 'cam-error';
