@@ -114,6 +114,14 @@ def api_insights(pid: str) -> dict[str, Any]:
     return db.step_insights(pid)
 
 
+@app.post("/api/clientlog")
+async def api_clientlog(payload: dict[str, Any]) -> dict[str, bool]:
+    """Script errors reported by phones (Diag.report in web/app.js)."""
+    log.warning("client %s: %s | %s", str(payload.get("kind"))[:20],
+                str(payload.get("message"))[:500], str(payload.get("ua"))[:140])
+    return {"ok": True}
+
+
 @app.get("/api/usage")
 def api_usage() -> dict[str, Any]:
     """Metered spend at list price, by model, against BUDGET_USD."""

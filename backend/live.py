@@ -53,6 +53,13 @@ def inferable(step: dict[str, Any]) -> bool:
     return not step.get("hazard") and (step.get("check") or "visual") == "visual"
 
 
+def log_diag(where: str, session: str | None, msg: dict[str, Any]) -> None:
+    """Log a phone's self-report on one line (see Diag in web/app.js)."""
+    keep = ("video", "audio", "ctx", "rate", "path", "mic_chunks", "dark", "hidden",
+            "frames", "stills", "streamed", "recorded", "notes", "ua")
+    log.info("diag %s %s %s", where, session or "-", {k: msg[k] for k in keep if k in msg})
+
+
 def decode_frame(payload: str) -> bytes:
     if payload.startswith("data:"):
         payload = payload.split(",", 1)[1]
@@ -117,6 +124,8 @@ class GuideSession:
         self.voice: VoiceRelay | None = None
         self.watcher: asyncio.Task | None = None
         self.judging: asyncio.Task | None = None
+        self.counts = {"frames": 0, "dark": 0, "audio_bytes": 0}   # logged at close
+        self.dark_said = 0.0
 
     # ---- helpers ---------------------------------------------------------
     @property
@@ -211,6 +220,20 @@ class GuideSession:
 
         elif kind == "watch":
             self.latest = (decode_frame(msg["data"]), time.monotonic())
+            self.counts["frames"] += 1
+
+        elif kind == "dark":
+            # The phone's view is black (lens covered, camera muted by iOS).
+            # Say so out loud, at most every 12 s, rather than check nothing.
+            self.counts["dark"] += 1
+            now = time.monotonic()
+            if now - self.dark_said > 12:
+                self.dark_said = now
+                await self.out.send({"type": "notice",
+                                     "text": "I can't see anything. Check the camera lens is clear."})
+
+        elif kind == "diag":
+            log_diag("guide", self.session_id, msg)
 
         elif kind == "still":
             # The phone saw no change in the view: the grounding we already
@@ -239,6 +262,7 @@ class GuideSession:
         return True
 
     async def on_audio(self, pcm: bytes) -> None:
+        self.counts["audio_bytes"] += len(pcm)
         if not config.VOICE or self.proc is None:
             return
         if self.voice is None:
@@ -617,6 +641,11 @@ class GuideSession:
 
     async def close(self) -> None:
         self.finished = True
+        # One line per guide session: enough to tell "the phone sent nothing"
+        # from "the server ignored it" without a debugger on the phone.
+        log.info("guide close: session %s, step %d, %d frames, %d dark, %d audio bytes",
+                 self.session_id, self.idx + 1, self.counts["frames"], self.counts["dark"],
+                 self.counts["audio_bytes"])
         for t in (self.watcher, self.judging):
             if t and not t.done():
                 t.cancel()
@@ -682,6 +711,8 @@ class CaptureSession:
             self.recording = True
             self.hint = msg.get("hint") or None
             await self.status("Recording. Narrate each step as you do it.")
+        elif kind == "diag":
+            log_diag("capture", None, msg)
         elif kind == "pause":
             if self.recording and self.paused_at is None:
                 self.paused_at = time.monotonic()

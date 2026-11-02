@@ -501,3 +501,34 @@ def test_untrackable_watch_items_are_not_grounded(monkeypatch):
     guide.ground_scene(step, b"jpeg")
     # The unfindable hazard costs no SAM call, and with no live hazard there is no hand search.
     assert sorted(asked) == ["red stop button", "spanner"]
+
+
+def test_dark_view_is_said_out_loud_once_not_every_frame(ctx):
+    client, pid, calls, plan, db = ctx
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        for _ in range(3):
+            ws.send_json({"type": "dark"})
+        notice = _until(ws, "notice")
+        assert "can't see" in notice["text"]
+        ws.send_json({"type": "repeat"})          # the next message must be the step, not a second notice
+        assert _until(ws, "speak")["type"] == "speak"
+        ws.send_json({"type": "abort"})
+    assert calls["ground"] == 0                   # a black view costs no SAM call
+
+
+def test_phone_reports_reach_the_log(ctx, caplog):
+    client, pid, *_ = ctx
+    caplog.set_level("INFO")
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "diag", "audio": "live/muted", "path": "stalled", "frames": 0, "secret": "x"})
+        ws.send_json({"type": "abort"})
+    r = client.post("/api/clientlog", json={"kind": "error", "message": "boom @app.js:12"})
+    assert r.json() == {"ok": True}
+    text = caplog.text
+    assert "live/muted" in text and "stalled" in text and "secret" not in text
+    assert "boom @app.js:12" in text
+    assert "guide close:" in text

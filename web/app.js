@@ -180,6 +180,28 @@ const Mic = {
       this.stop();
       throw new Error('audio suspended');     // caller falls back to MediaRecorder
     }
+    // iOS drops the context to "interrupted" for calls, Siri and its own
+    // speech; pick it back up rather than going quiet for the rest of the job.
+    this.ctx.onstatechange = () => {
+      if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') this.ctx.resume().catch(() => {});
+    };
+
+    // A running context is not proof of audio: on some iPhones the worklet
+    // path delivers nothing, silently. Watch for the first chunk, retry on the
+    // older ScriptProcessor path, and only then give up so the caller can fall
+    // back to recording.
+    for (const legacy of this.ctx.audioWorklet ? [false, true] : [true]) {
+      this.chunks = 0;
+      await this.wire(track, legacy);
+      for (let w = 0; w < 25 && !this.chunks; w++) await new Promise((r) => setTimeout(r, 100));
+      if (this.chunks) { this.path = legacy ? 'script' : 'worklet'; return; }
+      this.unwire();
+    }
+    this.path = 'stalled';
+    throw new Error('mic stalled');
+  },
+
+  async wire(track, legacy) {
     this.src = this.ctx.createMediaStreamSource(new MediaStream([track]));
     this.sink = this.ctx.createGain();
     this.sink.gain.value = 0;                 // keep the graph pulling, play nothing
@@ -203,6 +225,7 @@ const Mic = {
               for (let k = 0; k < out.length; k++) s += (out[k] / 32768) ** 2;
               this.onlevel(Math.min(1, Math.sqrt(s / out.length) * 4));
             }
+            this.chunks++;
             this.onchunk && this.onchunk(chunk.buffer);
             out = new Int16Array(this.CHUNK); n = 0;
           }
@@ -210,13 +233,16 @@ const Mic = {
       }
     };
 
-    if (this.ctx.audioWorklet) {
-      const code = `class M extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('ustad-mic',M)`;
-      const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
-      await this.ctx.audioWorklet.addModule(url);
+    if (!legacy) {
+      if (this.workletFor !== this.ctx) {     // a processor name registers once per context
+        const code = `class M extends AudioWorkletProcessor{process(i){const c=i[0]&&i[0][0];if(c)this.port.postMessage(c.slice(0));return true}}registerProcessor('ustad-mic',M)`;
+        const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+        await this.ctx.audioWorklet.addModule(url);
+        this.workletFor = this.ctx;
+      }
       this.node = new AudioWorkletNode(this.ctx, 'ustad-mic');
       this.node.port.onmessage = (e) => push(e.data);
-    } else {                                  // older Safari
+    } else {                                  // older Safari, and the fallback
       this.node = this.ctx.createScriptProcessor(4096, 1, 1);
       this.node.onaudioprocess = (e) => push(e.inputBuffer.getChannelData(0));
     }
@@ -224,11 +250,17 @@ const Mic = {
     this.node.connect(this.sink);
   },
 
-  disconnect() {
+  unwire() {
     try { this.src && this.src.disconnect(); } catch (_) {}
     try { this.node && this.node.disconnect(); } catch (_) {}
     try { this.sink && this.sink.disconnect(); } catch (_) {}
+    if (this.node && this.node.port) this.node.port.onmessage = null;
+    if (this.node) this.node.onaudioprocess = null;
     this.src = this.node = this.sink = null;
+  },
+
+  disconnect() {
+    this.unwire();
     this.onchunk = null;
     this.onlevel = null;
   },
@@ -239,6 +271,41 @@ const Mic = {
     this.ctx = null;
   },
 };
+
+/* ------------------------------------------------------------ telemetry */
+
+/* A glitch on a worker's phone is invisible from the server. So the phone
+ * reports what it saw: camera and mic track state, which audio path is live,
+ * how many frames and chunks actually went out, and any script error. It
+ * rides the session socket, and errors go by beacon so they survive a crash. */
+const Diag = {
+  notes: [],
+  note(what, detail) {
+    this.notes.push(`${what}: ${detail}`.slice(0, 200));
+    if (this.notes.length > 20) this.notes.shift();
+  },
+  snapshot(extra = {}) {
+    const s = MediaSource_.stream;
+    const tr = (t) => (t ? t.readyState + (t.muted ? '/muted' : '') + (t.enabled ? '' : '/off') : 'none');
+    return {
+      type: 'diag', ua: navigator.userAgent.slice(0, 140),
+      video: tr(s && s.getVideoTracks()[0]), audio: tr(s && s.getAudioTracks()[0]),
+      ctx: Mic.ctx ? Mic.ctx.state : 'none', rate: Mic.ctx ? Mic.ctx.sampleRate : 0,
+      path: Mic.path || 'none', mic_chunks: Mic.chunks || 0, dark: !!MediaSource_.dark,
+      hidden: document.hidden, notes: this.notes.slice(-8), ...extra,
+    };
+  },
+  flush(ws, extra) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(this.snapshot(extra)));
+  },
+  report(kind, message) {
+    this.note(kind, message);
+    const body = JSON.stringify({ kind, message: String(message).slice(0, 500), ua: navigator.userAgent.slice(0, 140) });
+    try { navigator.sendBeacon('/api/clientlog', new Blob([body], { type: 'application/json' })); } catch (_) {}
+  },
+};
+window.addEventListener('error', (e) => Diag.report('error', `${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) => Diag.report('rejection', (e.reason && (e.reason.stack || e.reason.message)) || e.reason));
 
 /* ------------------------------------------------------------ capture */
 
@@ -275,6 +342,22 @@ const Capture = {
     $('cap-btn').onclick = () => (this.recording ? this.stop() : this.start());
     $('cap-pause').onclick = () => (this.paused ? this.resume() : this.pause());
     $('cap-mark').onclick = () => this.mark();
+  },
+
+  startRecorder() {
+    this.recorder = null;
+    if (!window.MediaRecorder) return;
+    const audioOnly = new MediaStream(MediaSource_.stream.getAudioTracks());
+    const mime = ['audio/mp4', 'audio/webm'].find((m) => MediaRecorder.isTypeSupported(m)) || '';
+    try {
+      this.recorder = new MediaRecorder(audioOnly, mime ? { mimeType: mime } : undefined);
+      this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
+      this.recorder.start(1000);              // timeslices: a crash mid-take keeps what was said
+      this.mime = this.recorder.mimeType || mime;
+    } catch (err) {
+      this.recorder = null;
+      Diag.note('recorder', err.message);
+    }
   },
 
   /* The camera dropped mid-take: get it back without losing the recording. */
@@ -370,6 +453,9 @@ const Capture = {
       this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
 
       // Narration streams live: captions and step cards appear as you talk.
+      // A backup recording runs alongside, so a phone whose live audio path
+      // stalls still has its narration transcribed when the take ends.
+      this.startRecorder();
       try {
         this.micArgs = [
           (buf) => { if (!this.paused && this.ws && this.ws.readyState === 1) this.ws.send(buf); },
@@ -378,17 +464,11 @@ const Capture = {
         await Mic.start(MediaSource_.stream, ...this.micArgs);
         this.streamingMic = true;
       } catch (err) {
-        // Fall back to recording the narration and uploading it at the end.
         this.streamingMic = false;
-        const audioOnly = new MediaStream(MediaSource_.stream.getAudioTracks());
-        const mime = MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : 'audio/webm';
-        try {
-          this.recorder = new MediaRecorder(audioOnly, { mimeType: mime });
-          this.recorder.ondataavailable = (e) => e.data.size && this.chunks.push(e.data);
-          this.recorder.start();
-          this.mime = mime;
-        } catch (err2) {
-          $('cap-status').textContent = 'Narration recording unavailable: ' + err2.message;
+        Diag.note('mic', err.message);
+        if (this.recorder) {
+          $('cap-status').textContent =
+            'Live captions are off on this phone. Your narration is still recorded and read when you stop.';
         }
       }
     };
@@ -434,6 +514,7 @@ const Capture = {
     this.pausedAt = Date.now();
     clearInterval(this.timer);
     this.send({ type: 'pause' });
+    if (this.recorder && this.recorder.state === 'recording') this.recorder.pause();
     this.setState('paused', 'paused');
     $('cap-pause').textContent = 'Resume';
     $('cap-mark').disabled = true;
@@ -446,6 +527,7 @@ const Capture = {
     this.pausedTotal += Date.now() - this.pausedAt;
     this.paused = false;
     this.send({ type: 'resume' });
+    if (this.recorder && this.recorder.state === 'paused') this.recorder.resume();
     this.sendFrame();
     this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
     this.setState('recording', 'recording');
@@ -542,19 +624,28 @@ const Capture = {
     $('cap-pause').hidden = true;
     $('cap-mark').hidden = true;
 
+    let streamed = 0;
     if (this.streamingMic) {
       // Give the last words a moment to reach the server, then stop the mic.
       await new Promise((r) => setTimeout(r, 400));
+      streamed = Mic.chunks;
       Mic.stop();
-    } else if (this.recorder && this.recorder.state !== 'inactive') {
+    }
+    if (this.recorder && this.recorder.state !== 'inactive') {
       await new Promise((resolve) => {
         this.recorder.onstop = resolve;
         this.recorder.stop();
       });
-      const blob = new Blob(this.chunks, { type: this.mime });
-      const b64 = await blobToBase64(blob);
-      this.ws.send(JSON.stringify({ type: 'audio', data: b64, mime: this.mime }));
+      // The backup only travels when the live stream carried under 3 s of audio.
+      if (streamed < 30) {
+        const blob = new Blob(this.chunks, { type: this.mime });
+        if (blob.size) {
+          const b64 = await blobToBase64(blob);
+          this.ws.send(JSON.stringify({ type: 'audio', data: b64, mime: this.mime }));
+        }
+      }
     }
+    Diag.flush(this.ws, { streamed, recorded: this.chunks.length });
     this.ws.send(JSON.stringify({ type: 'stop' }));
   },
 
@@ -624,6 +715,7 @@ const Guide = {
 
   async open(procedureId) {
     Mic.prime();                                // inside the tap that opened the job
+    this.sent = { frames: 0, stills: 0, dark: 0 };
     show('guide');
     this.procedureId = procedureId;
     this.sessionId = null;
@@ -672,14 +764,21 @@ const Guide = {
       try {
         await Mic.start(MediaSource_.stream, this.micSend);
         $('guide-hints').classList.add('on');
-      } catch (_) {
+      } catch (err) {
+        Diag.note('mic', err.message);
         $('guide-hints').classList.remove('on');
+        this.toast('Voice commands are off on this phone. Use the buttons below.');
       }
+      const report = () => Diag.flush(this.ws, { frames: this.sent.frames, stills: this.sent.stills, dark: this.sent.dark });
+      report();
+      clearInterval(this.diagTimer);
+      this.diagTimer = setInterval(report, 15000);
     };
     this.ws.onmessage = (evt) => this.handle(JSON.parse(evt.data));
     this.ws.onerror = () => {};  // onclose drives reconnect
     this.ws.onclose = () => {
       clearInterval(this.watchTimer);
+      clearInterval(this.diagTimer);
       // Keep the unlocked audio context: a reconnect has no tap to unlock a new one.
       Mic.disconnect();
       if (!this.closing) this.scheduleReconnect();
@@ -724,9 +823,18 @@ const Guide = {
       diff = s / gray.length;
     }
     const stale = Date.now() - (this.lastSentAt || 0) > 8000;   // refresh now and then anyway
-    if (diff < 7 && !stale) { this.send({ type: 'still' }); return; }
+    if (diff < 7 && !stale) { this.send({ type: 'still' }); this.sent.stills++; return; }
     const data = MediaSource_.grab(video, WATCH_WIDTH, 0.62);
-    if (!data) return;
+    if (!data) {
+      // A black view used to mean silence on both ends. Now the server hears
+      // about it and tells the worker, instead of quietly checking nothing.
+      if (MediaSource_.dark) {
+        this.sent.dark++;
+        if (Date.now() - (this.darkSentAt || 0) > 4000) { this.send({ type: 'dark' }); this.darkSentAt = Date.now(); }
+      }
+      return;
+    }
+    this.sent.frames++;
     this.send({ type: 'watch', data });
     this.lastGray = gray;
     this.lastSentAt = Date.now();
@@ -812,6 +920,11 @@ const Guide = {
 
       case 'hazard':
         this.hazard(msg.message);
+        break;
+
+      case 'notice':                       // e.g. the view went dark
+        this.toast(msg.text);
+        Voice.say(msg.text);
         break;
 
       case 'proximity':
@@ -922,6 +1035,7 @@ const Guide = {
 
   teardown() {
     this.closing = true;                 // stop the reconnect loop from firing
+    clearInterval(this.diagTimer);
     clearTimeout(this.reconnectTimer);
     clearInterval(this.watchTimer);
     Mic.stop();
