@@ -532,3 +532,16 @@ def test_phone_reports_reach_the_log(ctx, caplog):
     assert "live/muted" in text and "stalled" in text and "secret" not in text
     assert "boom @app.js:12" in text
     assert "guide close:" in text
+
+
+def test_untrusted_log_input_cannot_forge_lines_or_flood(ctx, caplog, monkeypatch):
+    from backend import main
+    client, *_ = ctx
+    caplog.set_level("INFO")
+    client.post("/api/clientlog", json={"kind": "error", "message": "ok\nINFO ustad | forged line"})
+    assert "\nINFO ustad | forged" not in caplog.text and "\n" in caplog.text
+    monkeypatch.setattr(main, "_clientlog_gate", live._RateGate(2, 60.0))
+    results = [client.post("/api/clientlog", json={"kind": "e", "message": str(i)}).json()["ok"] for i in range(4)]
+    assert results == [True, True, False, False]
+    line = live.clean_for_log({"x": "a" * 500}, 40)
+    assert len(line) == 40

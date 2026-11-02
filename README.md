@@ -2,6 +2,8 @@
 
 **An AI copilot for industrial technicians that learns a procedure by watching an expert do it once, then guides and verifies every worker after that.**
 
+> **Developers and coding agents:** start with [AGENTS.md](AGENTS.md). Current state, timeline, architecture and decisions are in [docs/](docs/).
+
 Built for the Meta Global AI Developer Hackathon 2026 — Indie Developer track, *Push the Frontier*.
 
 ---
@@ -58,10 +60,10 @@ Every judged step leaves a timestamped photo behind, so a completed job produces
 |---|---|
 | **Phone PWA, not a native app** | No Xcode, no provisioning, no App Store review. The phone exposes exactly what glasses do — POV camera, mic, speaker — so the client is a thin media source behind one interface. When the glasses land, only that layer changes. |
 | **Boxes + confidence from SAM, not decoded masks** | Masks cost a decoder and buy nothing for verification. A box plus a confidence score is enough to tell the reasoning model *where* the part is, which is the entire point of grounding. |
-| **Batch ASR, not the realtime WebSocket** | Capture transcribes one recording at the end; guide transcribes 2–3 second commands. Streaming adds a day of work and no user-visible latency win. |
-| **Frames sampled every 2s, downscaled to 960px** | Streaming every frame to a vision model burns credits for nothing. Verification is event-driven — it fires when the worker says *done*, not continuously. |
+| **Realtime ASR, batch as fallback** | Live captions while the expert records, and hands-free voice commands while a worker is guided, need partial transcripts. Batch transcription stays as the fallback for a capture whose live audio path fails. |
+| **Live view at about 1 fps, sent only when it changes** | Capture samples a keyframe every 2 s. Guide sends a small frame about once a second, and only when the view changed; otherwise a tiny heartbeat. Grounding runs continuously, so a step can verify itself without the worker saying *done*. |
 | **Tool calling, not free-text verdicts** | A constrained tool call is auditable and executable. It is also what makes this a genuine agentic loop rather than a prompt that returns an opinion. |
-| **Spark 1.2 for audio fallback** | Audio understanding is not fully supported in Spark 1.3, so the ASR path degrades to 1.2 rather than failing. |
+| **No model audio fallback** | Spark 1.3 does not take audio, so the only fallback is batch ASR. A failure is reported, never papered over. |
 | **Pluggable reasoning backend** | The verification loop runs on the hosted Meta Model API *or* on Muse Glimmer deployed on our own infrastructure, switched by one env var. Both speak the OpenAI protocol, so the swap is a base URL. |
 
 ### Running on open weights

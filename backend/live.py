@@ -53,11 +53,41 @@ def inferable(step: dict[str, Any]) -> bool:
     return not step.get("hazard") and (step.get("check") or "visual") == "visual"
 
 
+def clean_for_log(value: Any, limit: int = 120) -> str:
+    """One short line from untrusted input: control characters escaped, so a
+    phone (or anyone) can't forge log lines with embedded newlines."""
+    text = value if isinstance(value, str) else repr(value)
+    text = "".join(c if c.isprintable() else repr(c)[1:-1] for c in text)
+    return text[:limit]
+
+
+_DIAG_KEYS = ("video", "audio", "ctx", "rate", "path", "mic_chunks", "dark", "hidden",
+              "frames", "stills", "streamed", "recorded", "ua")
+
+
 def log_diag(where: str, session: str | None, msg: dict[str, Any]) -> None:
-    """Log a phone's self-report on one line (see Diag in web/app.js)."""
-    keep = ("video", "audio", "ctx", "rate", "path", "mic_chunks", "dark", "hidden",
-            "frames", "stills", "streamed", "recorded", "notes", "ua")
-    log.info("diag %s %s %s", where, session or "-", {k: msg[k] for k in keep if k in msg})
+    """Log a phone's self-report on one bounded line (see Diag in web/app.js)."""
+    fields = {k: clean_for_log(msg[k], 140 if k == "ua" else 40) for k in _DIAG_KEYS if k in msg}
+    notes = msg.get("notes")
+    if isinstance(notes, list):
+        fields["notes"] = [clean_for_log(n, 100) for n in notes[:8]]
+    log.info("diag %s %s %s", where, clean_for_log(session or "-", 20), fields)
+
+
+class _RateGate:
+    """At most `n` events per `per` seconds. Telemetry must never be a way to
+    flood the log."""
+
+    def __init__(self, n: int, per: float) -> None:
+        self.n, self.per, self.times = n, per, []
+
+    def allow(self) -> bool:
+        now = time.monotonic()
+        self.times = [t for t in self.times if now - t < self.per]
+        if len(self.times) >= self.n:
+            return False
+        self.times.append(now)
+        return True
 
 
 def decode_frame(payload: str) -> bytes:
@@ -126,6 +156,7 @@ class GuideSession:
         self.judging: asyncio.Task | None = None
         self.counts = {"frames": 0, "dark": 0, "audio_bytes": 0}   # logged at close
         self.dark_said = 0.0
+        self.diag_gate = _RateGate(6, 60.0)     # the phone sends one every 15 s
 
     # ---- helpers ---------------------------------------------------------
     @property
@@ -233,7 +264,8 @@ class GuideSession:
                                      "text": "I can't see anything. Check the camera lens is clear."})
 
         elif kind == "diag":
-            log_diag("guide", self.session_id, msg)
+            if self.diag_gate.allow():
+                log_diag("guide", self.session_id, msg)
 
         elif kind == "still":
             # The phone saw no change in the view: the grounding we already
@@ -675,6 +707,7 @@ class CaptureSession:
         self.out = _Socket(ws)
         self.reset()
         self.voice: VoiceRelay | None = None
+        self.diag_gate = _RateGate(6, 60.0)
 
     def reset(self) -> None:
         self.keyframes: list[bytes] = []
@@ -712,7 +745,8 @@ class CaptureSession:
             self.hint = msg.get("hint") or None
             await self.status("Recording. Narrate each step as you do it.")
         elif kind == "diag":
-            log_diag("capture", None, msg)
+            if self.diag_gate.allow():
+                log_diag("capture", None, msg)
         elif kind == "pause":
             if self.recording and self.paused_at is None:
                 self.paused_at = time.monotonic()

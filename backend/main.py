@@ -114,11 +114,20 @@ def api_insights(pid: str) -> dict[str, Any]:
     return db.step_insights(pid)
 
 
+_clientlog_gate = live._RateGate(30, 60.0)   # unauthenticated: bound it
+
+
 @app.post("/api/clientlog")
 async def api_clientlog(payload: dict[str, Any]) -> dict[str, bool]:
-    """Script errors reported by phones (Diag.report in web/app.js)."""
-    log.warning("client %s: %s | %s", str(payload.get("kind"))[:20],
-                str(payload.get("message"))[:500], str(payload.get("ua"))[:140])
+    """Script errors reported by phones (Diag.report in web/app.js).
+
+    Anyone can post here, so every field is flattened to one escaped line and
+    the endpoint is rate-limited: it must not be a way to forge or flood logs.
+    """
+    if not _clientlog_gate.allow():
+        return {"ok": False}
+    log.warning("client %s: %s | %s", live.clean_for_log(payload.get("kind"), 20),
+                live.clean_for_log(payload.get("message"), 400), live.clean_for_log(payload.get("ua"), 140))
     return {"ok": True}
 
 
