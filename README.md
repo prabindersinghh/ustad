@@ -28,6 +28,19 @@ The visual evidence changes what the system does next. That is the difference be
 
 Every judged step leaves a timestamped photo behind, so a completed job produces an audit trail nobody had to write.
 
+**Ask Ustad.** Stuck? The worker just asks: "which one?", "it won't turn", "can I skip this?". Muse Spark answers from the expert's own recorded words and the live view, and answers with a tool call:
+- `answer` can **point**: SAM 3.1 lights up the part in the worker's view, and "Show me" puts the expert's own photo of the step beside it, with the part boxed.
+- `check_now` runs the step check.
+- `escalate` stops the worker and logs it for a supervisor. That is what happens to "can I skip the lockout?".
+
+After two failed checks, Ustad coaches without being asked. The judge itself also sees the expert's photo, so it knows what "right" looks like on this exact machine.
+
+**Works through dropouts.** If factory Wi-Fi drops mid-recording, the phone keeps recording and syncs the frames, step marks and narration when it reconnects. Mid-job, the worker carries on and the job resumes at the exact step.
+
+**Evidence pack.** Every job has a printable page with each step's photo, the SAM box, the verdict, the trail of errors caught, and the questions asked.
+
+**Procedures that improve themselves.** Muse Spark reads where workers failed, asked and skipped, and proposes concrete edits. Every new phrase is checked by SAM on the expert's photo. A supervisor approves each change, and each approval creates a new version.
+
 ---
 
 ## Architecture

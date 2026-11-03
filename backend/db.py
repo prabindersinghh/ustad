@@ -55,11 +55,36 @@ CREATE TABLE IF NOT EXISTS step_events (
     backend      TEXT,
     created_at   REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS procedure_history (
+    procedure_id TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    steps_json   TEXT NOT NULL,
+    note         TEXT,
+    created_at   REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS proposals (
+    id           TEXT PRIMARY KEY,
+    procedure_id TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    items_json   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'open',
+    created_at   REAL NOT NULL
+);
 """
 
 # Columns added after the first schema. Applied on every init so an existing
 # database upgrades in place instead of needing a wipe mid-hackathon.
-MIGRATIONS = [("step_events", "backend", "TEXT")]
+MIGRATIONS = [
+    ("step_events", "backend", "TEXT"),
+    ("step_events", "detections", "TEXT"),          # SAM boxes on the evidence photo
+    ("procedures", "version", "INTEGER DEFAULT 1"),
+    ("sessions", "procedure_version", "INTEGER"),
+]
+
+# Verdicts that are a judged check (as opposed to a skip, a question, a notice).
+CHECK_VERDICTS = ("pass", "fail", "retry")
 
 
 def connect() -> sqlite3.Connection:
@@ -112,10 +137,73 @@ def get_procedure(pid: str) -> dict[str, Any] | None:
     return out
 
 
+def update_procedure_steps(pid: str, steps: list[dict[str, Any]], note: str) -> int:
+    """Replace a procedure's steps, keeping the old ones in procedure_history.
+    Returns the new version number."""
+    with connect() as conn:
+        row = conn.execute("SELECT steps_json, version FROM procedures WHERE id = ?", (pid,)).fetchone()
+        if not row:
+            raise KeyError(pid)
+        version = int(row["version"] or 1)
+        conn.execute(
+            "INSERT INTO procedure_history (procedure_id, version, steps_json, note, created_at)"
+            " VALUES (?,?,?,?,?)", (pid, version, row["steps_json"], note, time.time()))
+        conn.execute("UPDATE procedures SET steps_json = ?, version = ? WHERE id = ?",
+                     (json.dumps(steps), version + 1, pid))
+    return version + 1
+
+
+def procedure_history(pid: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT version, note, created_at FROM procedure_history WHERE procedure_id = ?"
+            " ORDER BY version DESC", (pid,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def procedure_history_steps(pid: str, version: int) -> list[list[dict[str, Any]]]:
+    """The steps a procedure had at `version` (a one-item list, or empty)."""
+    with connect() as conn:
+        row = conn.execute("SELECT steps_json FROM procedure_history WHERE procedure_id = ? AND version = ?",
+                           (pid, version)).fetchone()
+    return [json.loads(row["steps_json"])] if row else []
+
+
+def save_proposal(pid: str, version: int, items: list[dict[str, Any]]) -> str:
+    prid = new_id()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO proposals (id, procedure_id, version, items_json, status, created_at)"
+            " VALUES (?,?,?,?,?,?)", (prid, pid, version, json.dumps(items), "open", time.time()))
+    return prid
+
+
+def get_proposal(prid: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM proposals WHERE id = ?", (prid,)).fetchone()
+    if not row:
+        return None
+    out = dict(row)
+    out["items"] = json.loads(out.pop("items_json"))
+    return out
+
+
+def latest_proposal(pid: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM proposals WHERE procedure_id = ? ORDER BY created_at DESC LIMIT 1",
+                           (pid,)).fetchone()
+    return get_proposal(row["id"]) if row else None
+
+
+def set_proposal_status(prid: str, status: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE proposals SET status = ? WHERE id = ?", (status, prid))
+
+
 def list_procedures() -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, title, machine, language, steps_json, created_at"
+            "SELECT id, title, machine, language, steps_json, created_at, version"
             " FROM procedures ORDER BY created_at DESC"
         ).fetchall()
     out = []
@@ -128,13 +216,14 @@ def list_procedures() -> list[dict[str, Any]]:
 
 # ------------------------------------------------------------------ sessions
 
-def start_session(procedure_id: str, worker_name: str | None, mode: str = "guide") -> str:
+def start_session(procedure_id: str, worker_name: str | None, mode: str = "guide",
+                  version: int | None = None) -> str:
     sid = new_id()
     with connect() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, procedure_id, worker_name, mode, started_at)"
-            " VALUES (?,?,?,?,?)",
-            (sid, procedure_id, worker_name, mode, time.time()),
+            "INSERT INTO sessions (id, procedure_id, worker_name, mode, started_at, procedure_version)"
+            " VALUES (?,?,?,?,?,?)",
+            (sid, procedure_id, worker_name, mode, time.time(), version),
         )
     return sid
 
@@ -159,16 +248,18 @@ def log_step_event(
     attempt: int = 1,
     latency_ms: int | None = None,
     backend: str | None = None,
+    detections: list[dict[str, Any]] | None = None,
 ) -> str:
     eid = new_id()
     with connect() as conn:
         conn.execute(
             "INSERT INTO step_events (id, session_id, step_index, verdict, confidence,"
-            " reason, grounding, evidence_path, attempt, latency_ms, backend, created_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " reason, grounding, evidence_path, attempt, latency_ms, backend, detections, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 eid, session_id, step_index, verdict, confidence, reason,
-                grounding, evidence_path, attempt, latency_ms, backend, time.time(),
+                grounding, evidence_path, attempt, latency_ms, backend,
+                json.dumps(detections) if detections else None, time.time(),
             ),
         )
     return eid
@@ -177,16 +268,22 @@ def log_step_event(
 def session_log(session_id: str) -> dict[str, Any]:
     with connect() as conn:
         session = conn.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            "SELECT s.*, p.title AS procedure_title FROM sessions s"
+            " LEFT JOIN procedures p ON p.id = s.procedure_id WHERE s.id = ?", (session_id,)
         ).fetchone()
         events = conn.execute(
             "SELECT * FROM step_events WHERE session_id = ? ORDER BY created_at",
             (session_id,),
         ).fetchall()
-    return {
-        "session": dict(session) if session else None,
-        "events": [dict(e) for e in events],
-    }
+    out = []
+    for e in events:
+        d = dict(e)
+        try:
+            d["detections"] = json.loads(d["detections"]) if d.get("detections") else []
+        except (TypeError, ValueError):
+            d["detections"] = []
+        out.append(d)
+    return {"session": dict(session) if session else None, "events": out}
 
 
 def list_sessions(limit: int = 50) -> list[dict[str, Any]]:
@@ -237,13 +334,20 @@ def step_insights(procedure_id: str) -> dict[str, Any]:
 
     def slot(i: int) -> dict[str, Any]:
         return steps.setdefault(i, {"step": i + 1, "runs": 0, "first_try": 0, "caught": 0,
-                                    "inferred": 0, "skipped": 0, "times": [], "reasons": []})
+                                    "inferred": 0, "skipped": 0, "asked": 0, "times": [],
+                                    "reasons": [], "questions": []})
 
     for sid, evs in by_session.items():
         last_done = started.get(sid, evs[0]["created_at"])
         seen: set[int] = set()
         for e in evs:
             st = slot(e["step_index"])
+            if e["verdict"] in ("asked", "notice", "help"):
+                if e["verdict"] in ("asked", "help"):
+                    st["asked"] += 1
+                    if e["reason"]:
+                        st["questions"].append(e["reason"])
+                continue                         # not an attempt at the step
             if e["step_index"] not in seen:
                 seen.add(e["step_index"])
                 st["runs"] += 1
@@ -268,6 +372,7 @@ def step_insights(procedure_id: str) -> dict[str, Any]:
         st["median_s"] = round(statistics.median(times), 1) if times else None
         st["first_try_rate"] = round(st["first_try"] / st["runs"], 2) if st["runs"] else None
         st["reasons"] = list(dict.fromkeys(reversed(st["reasons"])))[:3]
+        st["questions"] = list(dict.fromkeys(reversed(st["questions"])))[:5]
         out.append(st)
     hardest = max(out, key=lambda s: (s["caught"], -(s["first_try_rate"] or 1)), default=None)
     return {"runs": len(by_session), "steps": out,
@@ -324,7 +429,7 @@ def metrics() -> dict[str, Any]:
             "  SUM(CASE WHEN verdict='pass' THEN 1 ELSE 0 END) AS passes,"
             "  SUM(CASE WHEN verdict='fail' THEN 1 ELSE 0 END) AS fails,"
             "  AVG(latency_ms) AS avg_latency_ms"
-            " FROM step_events"
+            " FROM step_events WHERE verdict IN ('pass','fail','retry')"
         ).fetchone()
         sessions = conn.execute(
             "SELECT COUNT(*) AS n,"
@@ -337,7 +442,7 @@ def metrics() -> dict[str, Any]:
     with connect() as conn:
         by_backend = conn.execute(
             "SELECT COALESCE(backend,'unknown') AS backend, COUNT(*) AS n"
-            " FROM step_events GROUP BY 1"
+            " FROM step_events WHERE verdict IN ('pass','fail','retry') GROUP BY 1"
         ).fetchall()
     d["checks_by_backend"] = {r["backend"]: r["n"] for r in by_backend}
 

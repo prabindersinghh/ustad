@@ -49,7 +49,7 @@ On the iPhone:
 ## Test
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 75 tests, no network, no cost
+.venv/Scripts/python.exe -m pytest -q          # 109 tests, no network, no cost
 ```
 
 These hit the real APIs and **cost money** (cents):
@@ -91,6 +91,22 @@ diag guide <session> {'video': 'live', 'audio': 'live', 'ctx': 'running', 'rate'
 
 Script errors from phones appear as `client error: <message> | <user agent>`.
 
+## Testing the new features on a phone
+
+- **Ask Ustad:** in a job, tap **Ask Ustad** and say "which one?", or just ask
+  out loud ("how tight should it be?"). Server log: `ask (voice) '...' -> answer in N ms point_at=...`.
+- **Show me:** tap **Show me**, or say "where is it". You should see the
+  expert's photo with the part boxed. Only procedures captured since
+  2026-11-03 have expert photos; re-capture older ones.
+- **Network drop:** turn Wi-Fi off mid-capture for 10 s, then on. The clock
+  shows "offline", the badge counts frames kept, and the log shows
+  `capture <id> rejoined`. Mid-job: tap Done while offline; it checks on
+  reconnect. Log: `guide resume: session ... at step N`.
+- **Evidence pack:** the report screen's button, or the dashboard session's
+  "evidence pack" link.
+- **Improve:** dashboard, pick a procedure with runs, "Suggest
+  improvements" (one Spark call plus SAM checks, about a cent).
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
@@ -100,6 +116,8 @@ Script errors from phones appear as `client error: <message> | <user agent>`.
 | No live captions in capture | iOS audio path stalled | Narration is still recorded and transcribed at stop; check `diag path` |
 | Guide never checks anything | Phone view dark, or `confirm` step | A dark view is now spoken; see `guide close:` |
 | "Procedure generator produced no usable steps" | Take too short, or no frames | Record 1 to 5 minutes, narrate each step |
+| "The server restarted and lost this recording" | Server restarted mid-take (takes are kept in memory) | Record again |
+| Show me says "I can't see it" with no photo | Procedure captured before expert photos existed | Re-capture it |
 | Spend near the cap | Live watching uses SAM about every second | Budget guard turns watching off at 95%; raise `BUDGET_USD` only deliberately |
 
 ## Deadline checklist

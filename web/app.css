@@ -366,6 +366,44 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .step-spec.timed.up { background: rgba(18,160,106,.5); border-color: rgba(18,217,138,.7); }
 .step-spec.confirm { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.25); font-weight: 600; }
 
+/* capture: offline, still recording on the phone */
+.rec-clock.offline { background: rgba(232,144,10,.35); border-color: rgba(255,197,107,.6); }
+.rec-clock.offline span::after { content: " · offline"; color: #ffd28a; }
+
+/* guide: Show me / Ask Ustad */
+.aux-controls { display: flex; gap: 8px; margin: 0 0 12px; }
+.chip-btn { flex: 1; padding: 11px 12px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; border-radius: 12px; color: #fff; border: 1px solid rgba(255,255,255,.26); background: rgba(255,255,255,.12); backdrop-filter: blur(6px); }
+.chip-btn.ask { border-color: rgba(255,197,61,.65); background: rgba(255,197,61,.18); color: #ffe3a3; }
+.chip-btn:active { transform: scale(.98); }
+
+.ask-panel { margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: rgba(10,16,32,.78); backdrop-filter: blur(12px); border: 1px solid rgba(255,197,61,.45); animation: rise .25s cubic-bezier(.2,.8,.2,1); }
+.ask-panel[hidden] { display: none; }
+.ask-q { margin: 0; font-size: 14px; font-weight: 600; color: #ffe3a3; }
+.ask-a { margin: 6px 0 0; font-size: 16px; line-height: 1.4; font-weight: 600; color: #fff; }
+.ask-a:empty { display: none; }
+.ask-panel.thinking .ask-a { color: rgba(255,255,255,.7); font-weight: 500; animation: pulse 1.2s infinite; }
+.ask-panel.escalate { border-color: rgba(255,90,95,.8); background: rgba(80,10,14,.82); }
+.ask-panel.escalate .ask-a { color: #ffd0d1; }
+.ask-form { display: none; gap: 8px; margin-top: 10px; }
+.ask-panel.listening .ask-form { display: flex; }
+.ask-form input { flex: 1; min-width: 0; padding: 10px 12px; font: inherit; font-size: 16px; color: #fff; border-radius: 10px; border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.08); }
+.ask-form button { padding: 10px 14px; font: inherit; font-weight: 700; border: none; border-radius: 10px; background: #ffc53d; color: #2a1d00; cursor: pointer; }
+
+/* "Show me": the expert's own photo of the step, part boxed */
+.ref-card { position: absolute; right: 12px; top: calc(var(--safe-t) + 64px); z-index: 4; width: min(46vw, 240px); margin: 0; border-radius: 14px; overflow: hidden; background: #0a1020; border: 2px solid #ffc53d; box-shadow: 0 14px 40px rgba(0,0,0,.5); cursor: zoom-in; transition: width .25s ease; animation: rise .3s cubic-bezier(.2,.8,.2,1); }
+.ref-card[hidden] { display: none; }
+.ref-card.big { width: calc(100vw - 24px); max-width: 560px; cursor: zoom-out; }
+.ref-img { position: relative; line-height: 0; }
+.ref-img img { width: 100%; height: auto; display: block; }
+.ref-box { position: absolute; border: 3px solid #ffc53d; border-radius: 8px; box-shadow: 0 0 0 9999px rgba(0,0,0,.28), 0 0 14px #ffc53d; }
+.ref-box[hidden] { display: none; }
+.ref-card figcaption { padding: 8px 10px 9px; font-size: 12px; line-height: 1.35; color: rgba(255,255,255,.8); }
+.ref-card figcaption b { display: block; color: #ffe3a3; font-size: 12.5px; }
+.ref-close { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,.55); color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
+
+.pack-link { display: block; margin: 0 0 16px; padding: 15px; text-align: center; font-weight: 700; color: #fff; background: var(--blue); border-radius: 14px; text-decoration: none; box-shadow: var(--shadow-sm); }
+.event.asked { border-left-color: #ffc53d; } .event.help { border-left-color: var(--bad); }
+
 /* capture: steps forming as the expert talks */
 .drafts { display: flex; flex-direction: column; gap: 8px; max-height: 34vh; overflow-y: auto; margin-bottom: 12px; scrollbar-width: none; mask-image: linear-gradient(transparent, #000 18px); -webkit-mask-image: linear-gradient(transparent, #000 18px); }
 .drafts::-webkit-scrollbar { display: none; }

@@ -69,7 +69,10 @@ Produce a JSON object:
                    a torque wrench, a spanner, a scraper. Only objects you can
                    see in the keyframes.),
       "common_mistake": "<the most likely error, or null>",
-      "hazard": "<safety warning to speak before the step, or null>"
+      "hazard": "<safety warning to speak before the step, or null>",
+      "expert_said": "<the expert's own words about this step, quoted verbatim
+                      from the narration (one to three sentences, keep their
+                      tips and reasons), or null if they said nothing about it>"
     }
   ]
 }
@@ -150,6 +153,9 @@ def build_procedure(
             proc = _validate_and_repair(proc, frames, transcript, hint=hint, times=times)
         except Exception:  # noqa: BLE001 - validation is best-effort, never fatal
             log.exception("Procedure self-check failed; returning unvalidated procedure")
+    # keyframe_index points into the frames the writer saw; the caller keeps
+    # those frames as each step's reference photo.
+    proc["_frames"] = frames
     return proc
 
 
@@ -326,7 +332,8 @@ def _check_grounding(
     from concurrent.futures import ThreadPoolExecutor
 
     def one(step: dict[str, Any]) -> bool:
-        """True when the step fails grounding."""
+        """True when the step fails grounding. A hit keeps its best box as
+        `ref_box`: where the part sits in the expert's photo, for "show me"."""
         if step.get("check") == "confirm":
             return False                      # not visually checkable by design
         phrase = (step.get("target_phrase") or "").strip()
@@ -336,10 +343,14 @@ def _check_grounding(
         if not isinstance(ki, int) or not (0 <= ki < len(frames)):
             ki = min(step.get("index", 0), len(frames) - 1)
         try:
-            return not segment_fn(phrase, frames[ki])
+            dets = segment_fn(phrase, frames[ki])
         except Exception as exc:  # noqa: BLE001 - a SAM error is not a bad phrase
             log.warning("Grounding check errored for %r: %s", phrase, exc)
             return False
+        best = max(dets, key=lambda d: getattr(d, "confidence", 0) or 0, default=None)
+        if best is not None and hasattr(best, "to_dict"):
+            step["ref_box"] = best.to_dict()
+        return not dets
 
     with ThreadPoolExecutor(max_workers=min(6, max(1, len(steps)))) as pool:
         failed = list(pool.map(one, steps))
@@ -426,6 +437,7 @@ def _normalise(data: Any, *, n_frames: int = 0) -> dict[str, Any]:
                 "watch_for": _clean_watch(raw.get("watch_for"), raw.get("target_phrase")),
                 "common_mistake": raw.get("common_mistake") or None,
                 "hazard": raw.get("hazard") or None,
+                "expert_said": (str(raw.get("expert_said") or "").strip()[:400]) or None,
             }
         )
 

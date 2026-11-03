@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=13" />
+<link rel="stylesheet" href="app.css?v=15" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -421,12 +421,29 @@
     <div id="guide-hazard" class="hazard" role="alert"></div>
     <div id="guide-toast" class="toast"></div>
     <div id="verdict-flash" class="verdict-flash"></div>
+    <figure id="ref-card" class="ref-card" hidden>
+      <div class="ref-img"><img id="ref-img" alt="The expert's view of this step"><span id="ref-box" class="ref-box" hidden></span></div>
+      <figcaption><b id="ref-title">Expert's view</b><span id="ref-said"></span></figcaption>
+      <button class="ref-close" aria-label="Close">&times;</button>
+    </figure>
     <div class="overlay-bottom">
+      <div id="ask-panel" class="ask-panel" hidden aria-live="polite">
+        <p id="ask-q" class="ask-q"></p>
+        <p id="ask-a" class="ask-a"></p>
+        <form id="ask-form" class="ask-form" autocomplete="off">
+          <input id="ask-input" type="text" placeholder="Or type a question" enterkeyhint="send" />
+          <button type="submit">Ask</button>
+        </form>
+      </div>
       <p id="guide-heard" class="heard"></p>
       <p id="guide-step-title" class="step-title"></p>
       <p id="guide-instruction" class="instruction">Starting…</p>
       <div id="guide-spec" class="step-spec" hidden></div>
-      <div id="guide-hints" class="hints">Say <b>done</b> <b>repeat</b> <b>what's wrong</b> <b>where</b></div>
+      <div id="guide-hints" class="hints">Say <b>done</b> <b>where is it</b> <b>repeat</b> or just ask</div>
+      <div class="aux-controls">
+        <button id="guide-show" class="chip-btn">Show me</button>
+        <button id="guide-ask" class="chip-btn ask">Ask Ustad</button>
+      </div>
       <div class="guide-controls">
         <button id="guide-repeat" class="ghost">Repeat</button>
         <button id="guide-done" class="cockpit-primary">Done. Check it</button>
@@ -445,6 +462,6 @@
   <div id="report-body" class="list"></div>
 </section>
 
-<script src="app.js?v=14"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

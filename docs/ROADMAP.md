@@ -29,10 +29,11 @@ demo and for a factory.
 
 | # | Item | What it adds | Gap closed | Est. | Status |
 |---|---|---|---|---|---|
-| 1 | **Ask Ustad: conversational guide** | The worker asks anything mid-step, by voice: "which one?", "it won't turn", "what does this light mean?". Spark answers from the step, the whole procedure, **the expert's own words at that moment of the recording** and the live frame. It can **point**: SAM highlights the part it means. "Show me" plays the expert's keyframe for the step. Coaching kicks in after two failed checks. | Branching and troubleshooting, help when stuck, the "expert in your ear" feeling. The X-factor for the demo. | 5 to 6 h | Proposed (user's idea) |
-| 2 | **Verify against the expert's end state** | `judge_step` also gets the expert's keyframe for that step as a reference image: "does the worker's view match how the expert left it?" Few-shot visual comparison. | Accuracy on look-alike parts and subtle states; technical depth | 1 to 2 h | Proposed |
-| 3 | **Self-improving procedures (agent loop)** | After runs, Spark reads the insights (where workers fail, ask, or get caught) and proposes concrete edits: reword, split a step, add a watch item, add a common mistake. The expert approves in the dashboard, giving a versioned procedure. | Procedures get better every shift; Best Agentic | 3 h | Proposed |
-| 4 | **Evidence pack per job** | One shareable page per completed job: every step's photo with the SAM box, verdict, reason, time and backend. Printable for ISO 9001 or customer audits. | Turns verification into compliance value a plant manager pays for | 2 h | Proposed |
+| 1 | **Ask Ustad: conversational guide** | Ask by voice or typing; answers from the expert's words and the live view; points with SAM; "Show me" the expert's photo; coaching after 2 fails; escalate to a supervisor. | Help when stuck; the "expert in your ear" | | **Done** (11-03) |
+| 2 | **Verify against the expert's photo** | `judge_step` sees the expert's keyframe first. | Recognition of the right part on this machine | | **Done** (11-03) |
+| 3 | **Self-improving procedures (agent loop)** | Spark proposes edits from run evidence, SAM checks phrases, supervisor approves, versions. | Best Agentic | | **Done** (11-03). Later: proposals that split or add steps (needs step-id remapping) |
+| 4 | **Evidence pack per job** | Printable page per job. | Compliance value | | **Done** (11-03). Later: signed or hashed record |
+| 4b | **Offline resilience** (user request) | Capture keeps recording through a drop and syncs; guide resumes exactly. | Real factory Wi-Fi | | **Done** (11-03). Later: persist takes to disk |
 | 5 | **Hindi voice** | Spark writes and speaks steps in Hindi (`hi-IN` TTS on iPhone); intents in Hindi. | Real Indian shop floors | 2 to 3 h | Optional (user: English first, Hindi if possible) |
 | 6 | **Smooth AR box between SAM results** | Track the box on the phone between 1 fps results (optical flow or interpolation). | The live view feels instant | 2 h | Optional |
 | 7 | **Muse Glimmer on Modal** | Verification on open weights, on infrastructure the plant controls. | Open Weights prize; data stays on site | 1 to 2 h | Blocked: user's Modal login |
@@ -93,4 +94,5 @@ What funded startups and incumbents do, and where Ustad stands apart.
 | Multi-object detection, hand-near-hazard, left-behind tools, phrase self-check | `c020f1f` |
 | iPhone camera recovery | `39c7562` |
 | Self-healing mic, backup narration, dark notice, telemetry | `b59d3d3` |
-| Project docs | this commit |
+| Project docs | `d52721e` |
+| Expert reference, Ask Ustad, Show me, coaching, offline resilience, evidence pack, self-improving procedures | 2026-11-03 13:40 (see TIMELINE) |

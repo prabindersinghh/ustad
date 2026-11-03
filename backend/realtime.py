@@ -158,6 +158,29 @@ _INTENTS: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 
+_QUESTION_START = ("how", "what", "which", "where", "why", "when", "can", "could", "should", "do", "does",
+                   "did", "is", "are", "will", "would", "has", "have", "who")
+_HELP = ("help", "stuck", "won't", "wont", "can't", "cant", "doesn't", "doesnt", "not working",
+         "not moving", "don't know", "dont know", "don't understand", "confused", "ustad", "show me how",
+         "tell me", "explain")
+
+
+def is_question(text: str) -> bool:
+    """Is this utterance something to answer (a question or a call for help),
+    rather than the worker talking to themselves or a colleague?
+
+    Kept narrow on purpose: every answer is a model call and it talks over the
+    worker. The Ask button bypasses this for anything said right after it.
+    """
+    t = " ".join(text.lower().replace(",", " ").split())
+    words = t.rstrip("?.!").split()
+    if len(words) < 2 or len(words) > 40:
+        return False
+    if "?" in text or words[0].strip("'") in _QUESTION_START:
+        return True
+    return any(f" {h} " in f" {t.rstrip('?.!')} " for h in _HELP)
+
+
 def intent_of(text: str) -> str | None:
     """Map a finished utterance to a guide command, or None if it isn't one.
 

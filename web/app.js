@@ -307,6 +307,45 @@ const Diag = {
 window.addEventListener('error', (e) => Diag.report('error', `${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
 window.addEventListener('unhandledrejection', (e) => Diag.report('rejection', (e.reason && (e.reason.stack || e.reason.message)) || e.reason));
 
+/* ----------------------------------------------------------- liveness */
+
+/* A phone that walks out of Wi-Fi range often leaves its socket half-open:
+ * no error, no close, just silence. So every socket pings every 7 s, and one
+ * that hasn't heard anything for 20 s is treated as closed, which starts the
+ * reconnect right away instead of minutes later. */
+const Liveness = {
+  timers: new Map(),
+  watch(ws, lastHeard) {
+    this.stop(ws);
+    this.timers.set(ws, setInterval(() => {
+      if (ws.readyState !== 1) { this.stop(ws); return; }
+      if (Date.now() - lastHeard() > 20000) {
+        Diag.note('liveness', 'no reply in 20 s');
+        this.stop(ws);
+        const onclose = ws.onclose;
+        ws.onclose = ws.onmessage = null;
+        try { ws.close(); } catch (_) {}
+        if (onclose) onclose();
+        return;
+      }
+      try { ws.send(JSON.stringify({ type: 'ping' })); } catch (_) {}
+    }, 7000));
+  },
+  stop(ws) { clearInterval(this.timers.get(ws)); this.timers.delete(ws); },
+};
+
+/* Drop a socket we are replacing, silently: its late close or messages must
+ * not schedule another reconnect or act on stale state. */
+function retire(ws) {
+  if (!ws) return;
+  Liveness.stop(ws);
+  ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+  if (ws.readyState <= 1) { try { ws.close(); } catch (_) {} }
+}
+
+/* The browser says the network is back: don't wait out the backoff. */
+window.addEventListener('online', () => { Capture.kick(); Guide.kick(); });
+
 /* ------------------------------------------------------------ capture */
 
 /* Recording a job is the expert's one shot, so the screen tells them exactly
@@ -427,84 +466,185 @@ const Capture = {
     this.pausedTotal = 0;
     this.clearDrafts();
     $('cap-btn').textContent = 'Connecting…';
-    this.ws = new WebSocket(WS_BASE + '/ws/capture');
-    this.ws.binaryType = 'arraybuffer';
     this.chunks = [];
+    this.captureId = null;
+    this.offline = false;
+    this.pendingFrames = [];
+    this.pendingAudio = [];
+    this.stopQueued = null;
+    this.retries = 0;
+    this.sentChunks = 0;
+    this.connect(true);
+  },
 
-    this.ws.onopen = async () => {
-      this.connecting = false;
-      this.ws.send(JSON.stringify({ type: 'start' }));
-      this.recording = true;
-      this.startedAt = Date.now();
-      clearInterval(this.clock);
-      this.clock = setInterval(() => this.tick(), 250);
-      this.setState('recording', 'recording');
-      $('cap-btn').disabled = false;
-      $('cap-btn').textContent = 'Stop & build';
-      $('cap-btn').classList.add('stop');
-      $('cap-pause').hidden = false;
-      $('cap-mark').hidden = false;
-      $('cap-pause').textContent = 'Pause';
-      this.setBadge();
-      $('cap-status').textContent = 'Recording. Say each step as you do it. Say "next step" to start a new one.';
-
-      // First frame now, then sample on an interval. Even a short take has frames.
-      this.sendFrame();
-      this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
-
-      // Narration streams live: captions and step cards appear as you talk.
-      // A backup recording runs alongside, so a phone whose live audio path
-      // stalls still has its narration transcribed when the take ends.
-      this.startRecorder();
-      try {
-        this.micArgs = [
-          (buf) => { if (!this.paused && this.ws && this.ws.readyState === 1) this.ws.send(buf); },
-          (level) => { $('cap-level').style.width = (this.paused ? 0 : Math.round(level * 100)) + '%'; },
-        ];
-        await Mic.start(MediaSource_.stream, ...this.micArgs);
-        this.streamingMic = true;
-      } catch (err) {
-        this.streamingMic = false;
-        Diag.note('mic', err.message);
-        if (this.recorder) {
-          $('cap-status').textContent =
-            'Live captions are off on this phone. Your narration is still recorded and read when you stop.';
+  /* One socket per connection, many connections per take. The first one
+   * starts the take; after a drop, the next one rejoins it by id and the
+   * frames and narration the phone kept while offline are synced. */
+  connect(first) {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    retire(this.ws);                            // exactly one socket per take at a time
+    const ws = new WebSocket(WS_BASE + '/ws/capture');
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    ws.onopen = () => {
+      this.retries = 0;
+      this.lastHeard = Date.now();
+      Liveness.watch(ws, () => this.lastHeard);
+      if (first) this.begin();
+      else ws.send(JSON.stringify({ type: 'rejoin', capture_id: this.captureId, at: this.elapsed(), paused: this.paused }));
+    };
+    ws.onmessage = (evt) => { this.lastHeard = Date.now(); this.handle(JSON.parse(evt.data), ws); };
+    ws.onerror = () => {};
+    ws.onclose = () => {
+      if (ws !== this.ws) return;               // an old socket closing late
+      Liveness.stop(ws);
+      if (first && !this.recording) {           // never got going
+        if (this.connecting) {
+          this.connecting = false;
+          $('cap-status').textContent = 'Could not reach the server. Check the laptop is running, then try again.';
+          this.resetButton();
         }
+        return;
       }
+      if (!(this.recording || this.processing || this.stopQueued)) return;
+      // The phone keeps recording: camera frames and narration are held
+      // here and synced when the connection comes back.
+      this.offline = true;
+      this.setOffline(true);
+      const delay = Math.min(1000 * 2 ** this.retries, 5000);
+      this.retries += 1;
+      this.reconnectTimer = setTimeout(() => this.connect(false), delay);
     };
+  },
 
-    this.ws.onmessage = (evt) => {
-      const msg = JSON.parse(evt.data);
-      if (msg.type === 'frame_ack') { this.frames = msg.count; this.setBadge(); }
-      if (msg.type === 'heard') this.caption(msg.text, msg.final);
-      if (msg.type === 'draft') this.addDraft(msg);
-      if (msg.type === 'draft_title') this.titleDraft(msg);
-      if (msg.type === 'marker') this.addMarker(msg);
-      if (msg.type === 'status') $('cap-status').textContent = msg.message;
-      if (msg.type === 'error') {
-        $('cap-status').textContent = msg.message;
-        this.resetButton();
-      }
-      if (msg.type === 'procedure') {
-        this.setState('saved', 'saved');
+  /* The network is back: reconnect now, unless a socket is already on its way. */
+  kick() {
+    if (this.offline && this.reconnectTimer && !(this.ws && this.ws.readyState <= 1)) this.connect(false);
+  },
+
+  setOffline(on) {
+    $('cap-clock').classList.toggle('offline', on);
+    if (on) {
+      $('cap-status').textContent = this.processing
+        ? 'Connection lost while building. Reconnecting to collect your procedure…'
+        : 'No connection. Still recording on the phone. It will sync when the connection is back.';
+    }
+  },
+
+  handle(msg, ws) {
+    if (msg.type === 'capture') this.captureId = msg.capture_id;
+    if (msg.type === 'rejoined') this.synced(msg, ws);
+    if (msg.type === 'rejoin_failed') {
+      this.offline = false;
+      this.setOffline(false);
+      $('cap-status').textContent = 'The server restarted and lost this recording. Stop, then record again.';
+      this.stopQueued = null;
+      if (this.processing) this.resetButton();
+    }
+    if (msg.type === 'frame_ack') { this.frames = msg.count; this.setBadge(); }
+    if (msg.type === 'heard') this.caption(msg.text, msg.final);
+    if (msg.type === 'draft') this.addDraft(msg);
+    if (msg.type === 'draft_title') this.titleDraft(msg);
+    if (msg.type === 'marker') this.addMarker(msg);
+    if (msg.type === 'status') $('cap-status').textContent = msg.message;
+    if (msg.type === 'error') {
+      $('cap-status').textContent = msg.message;
+      this.resetButton();
+    }
+    if (msg.type === 'procedure') {
+      this.processing = false;
+      this.setState('saved', 'saved');
+      $('cap-status').textContent =
+        `Saved "${msg.procedure.title}". ${msg.procedure.steps.length} steps. Opening your procedures…`;
+      Voice.say(`Procedure saved. ${msg.procedure.steps.length} steps.`);
+      this.send({ type: 'close' });
+      setTimeout(() => Library.open(msg.procedure_id), 1600);
+    }
+  },
+
+  /* Back online: send what was kept while offline, oldest first, on the
+   * socket that rejoined. Anything that can't go now stays for the next one. */
+  synced(msg, ws) {
+    if (ws !== this.ws || ws.readyState !== 1) return;
+    const frames = this.pendingFrames.splice(0);
+    frames.forEach((f) => ws.send(JSON.stringify(
+      f.mark ? { type: 'mark', at: f.at, quiet: true } : { type: 'frame', data: f.data, at: f.at })));
+    const gaps = this.pendingAudio.splice(0);
+    gaps.forEach((g) => this.sendGap(g, ws));
+    this.offline = false;
+    this.setOffline(false);
+    Diag.note('rejoin', `${msg.state}, ${frames.length} frames, ${gaps.length} audio gaps`);
+    if (msg.state === 'recording') {
+      const n = frames.filter((f) => !f.mark).length;
+      $('cap-status').textContent = n || gaps.length
+        ? `Back online. Synced ${n} frame${n === 1 ? '' : 's'}${gaps.length ? ' and the narration' : ''} from while you were offline.`
+        : 'Back online. Still recording.';
+    }
+    if (this.stopQueued) { const fin = this.stopQueued; this.stopQueued = null; this.deliverStop(fin); }
+  },
+
+  /* Offline narration goes up as 16 kHz PCM, a minute per message. */
+  sendGap(g, ws) {
+    const per = 16000 * 60 / Mic.CHUNK;            // chunks in a minute
+    for (let i = 0; i < g.chunks.length; i += per) {
+      const part = g.chunks.slice(i, i + per);
+      const pcm = new Uint8Array(part.reduce((n, c) => n + c.byteLength, 0));
+      let o = 0;
+      part.forEach((c) => { pcm.set(new Uint8Array(c), o); o += c.byteLength; });
+      ws.send(JSON.stringify({ type: 'audio_gap', at: g.at + (i * Mic.CHUNK) / 16000, data: bytesToBase64(pcm) }));
+    }
+  },
+
+  /* The socket is open and the server has a fresh take: start recording. */
+  async begin() {
+    this.connecting = false;
+    this.ws.send(JSON.stringify({ type: 'start' }));
+    this.recording = true;
+    this.startedAt = Date.now();
+    clearInterval(this.clock);
+    this.clock = setInterval(() => this.tick(), 250);
+    this.setState('recording', 'recording');
+    $('cap-btn').disabled = false;
+    $('cap-btn').textContent = 'Stop & build';
+    $('cap-btn').classList.add('stop');
+    $('cap-pause').hidden = false;
+    $('cap-mark').hidden = false;
+    $('cap-pause').textContent = 'Pause';
+    this.setBadge();
+    $('cap-status').textContent = 'Recording. Say each step as you do it. Say "next step" to start a new one.';
+
+    // First frame now, then sample on an interval. Even a short take has frames.
+    this.sendFrame();
+    this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
+
+    // Narration streams live: captions and step cards appear as you talk.
+    // A backup recording runs alongside, so a phone whose live audio path
+    // stalls still has its narration transcribed when the take ends.
+    this.startRecorder();
+    try {
+      this.micArgs = [(buf) => this.onMic(buf),
+        (level) => { $('cap-level').style.width = (this.paused ? 0 : Math.round(level * 100)) + '%'; }];
+      await Mic.start(MediaSource_.stream, ...this.micArgs);
+      this.streamingMic = true;
+    } catch (err) {
+      this.streamingMic = false;
+      Diag.note('mic', err.message);
+      if (this.recorder) {
         $('cap-status').textContent =
-          `Saved "${msg.procedure.title}". ${msg.procedure.steps.length} steps. Opening your procedures…`;
-        Voice.say(`Procedure saved. ${msg.procedure.steps.length} steps.`);
-        setTimeout(() => Library.open(msg.procedure_id), 1600);
+          'Live captions are off on this phone. Your narration is still recorded and read when you stop.';
       }
-    };
+    }
+  },
 
-    this.ws.onerror = () => {};
-    this.ws.onclose = () => {
-      if (this.connecting || this.recording || this.processing) {
-        $('cap-status').textContent = 'Lost the connection to the server. Check the laptop is running, then try again.';
-        this.connecting = this.recording = this.processing = false;
-        clearInterval(this.timer);
-        clearInterval(this.clock);
-        Mic.stop();
-        this.resetButton();
-      }
-    };
+  /* A 100 ms chunk of narration: live to the server, or kept while offline
+   * (up to 10 minutes) with the job-clock time its gap started at. */
+  onMic(buf) {
+    if (this.paused || !this.recording) return;
+    if (!this.offline && this.ws && this.ws.readyState === 1) { this.ws.send(buf); this.sentChunks++; return; }
+    let gap = this.pendingAudio[this.pendingAudio.length - 1];
+    if (!gap || gap.closed) { gap = { at: this.elapsed(), chunks: [] }; this.pendingAudio.push(gap); }
+    if (this.pendingAudio.reduce((n, g) => n + g.chunks.length, 0) < 6000) gap.chunks.push(buf.slice(0));
   },
 
   /* ---- pause / resume / mark -------------------------------------------- */
@@ -514,6 +654,8 @@ const Capture = {
     this.pausedAt = Date.now();
     clearInterval(this.timer);
     this.send({ type: 'pause' });
+    const gap = this.pendingAudio[this.pendingAudio.length - 1];
+    if (gap) gap.closed = true;                 // offline narration after the pause starts a new gap
     if (this.recorder && this.recorder.state === 'recording') this.recorder.pause();
     this.setState('paused', 'paused');
     $('cap-pause').textContent = 'Resume';
@@ -539,16 +681,28 @@ const Capture = {
   mark() {
     if (!this.recording || this.paused) return;
     this.sendFrame();                // the frame at the boundary is worth keeping
-    this.send({ type: 'mark' });
+    const msg = { type: 'mark', at: this.elapsed() };
+    if (this.online()) this.send(msg);
+    else { this.pendingFrames.push({ mark: true, at: msg.at }); this.addMarker({ n: ++this.steps, at: mmss(msg.at) }); }
   },
+
+  online() { return !this.offline && this.ws && this.ws.readyState === 1; },
 
   send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); },
 
   sendFrame() {
     if (this.paused) return;
     const data = MediaSource_.grab($('cap-video'));
-    if (data && this.ws && this.ws.readyState === 1) {
+    if (data && this.online()) {
       this.ws.send(JSON.stringify({ type: 'frame', data }));
+    } else if (data) {
+      // Offline: keep it with its job-clock time. Past 150 frames (5 min),
+      // thin the oldest half rather than lose the end of the job.
+      this.pendingFrames.push({ data, at: this.elapsed() });
+      if (this.pendingFrames.length > 150) {
+        this.pendingFrames = this.pendingFrames.filter((f, i) => f.mark || i % 2 === 0 || i > 75);
+      }
+      $('cap-badge').textContent = `${this.frames || 0} + ${this.pendingFrames.filter((f) => !f.mark).length} offline`;
     }
     this.darkStreak = MediaSource_.dark ? (this.darkStreak || 0) + 1 : 0;
     if (this.darkStreak === 2) {
@@ -624,39 +778,54 @@ const Capture = {
     $('cap-pause').hidden = true;
     $('cap-mark').hidden = true;
 
-    let streamed = 0;
     if (this.streamingMic) {
       // Give the last words a moment to reach the server, then stop the mic.
       await new Promise((r) => setTimeout(r, 400));
-      streamed = Mic.chunks;
       Mic.stop();
     }
+    const fin = { audio: null, streamed: this.sentChunks };
     if (this.recorder && this.recorder.state !== 'inactive') {
       await new Promise((resolve) => {
         this.recorder.onstop = resolve;
         this.recorder.stop();
       });
-      // The backup only travels when the live stream carried under 3 s of audio.
-      if (streamed < 30) {
+      // The backup only travels when the live stream (online or synced
+      // later) carried under 3 s of audio.
+      const kept = this.pendingAudio.reduce((n, g) => n + g.chunks.length, 0);
+      if (this.sentChunks + kept < 30) {
         const blob = new Blob(this.chunks, { type: this.mime });
-        if (blob.size) {
-          const b64 = await blobToBase64(blob);
-          this.ws.send(JSON.stringify({ type: 'audio', data: b64, mime: this.mime }));
-        }
+        if (blob.size) fin.audio = { type: 'audio', data: await blobToBase64(blob), mime: this.mime };
       }
     }
-    Diag.flush(this.ws, { streamed, recorded: this.chunks.length });
+    this.deliverStop(fin);
+  },
+
+  /* Send the end of the take, now or (offline) as soon as the phone rejoins. */
+  deliverStop(fin) {
+    if (!this.online()) {
+      this.stopQueued = fin;
+      $('cap-status').textContent = 'Stopped. Waiting for the connection to build your procedure. Keep this screen open.';
+      return;
+    }
+    if (fin.audio) this.ws.send(JSON.stringify(fin.audio));
+    Diag.flush(this.ws, { streamed: fin.streamed, recorded: this.chunks.length });
     this.ws.send(JSON.stringify({ type: 'stop' }));
   },
 
   teardown() {
     clearInterval(this.timer);
     clearInterval(this.clock);
+    clearTimeout(this.reconnectTimer);
     Mic.stop();
     if (this.recorder && this.recorder.state !== 'inactive') this.recorder.stop();
     this.recording = this.connecting = this.processing = this.paused = false;
+    this.stopQueued = null;
+    this.offline = false;
     this.startedAt = 0;
-    if (this.ws) { const ws = this.ws; this.ws = null; ws.onclose = null; try { ws.close(); } catch (_) {} }
+    if (this.ws) {
+      const ws = this.ws; this.ws = null; ws.onclose = null; Liveness.stop(ws);
+      try { ws.close(); } catch (_) {}
+    }
     MediaSource_.stop();
     Voice.stop();
   },
@@ -711,7 +880,7 @@ const Library = {
 const Guide = {
   ws: null, sessionId: null, procedureId: null, busy: false,
   closing: false, retries: 0, reconnectTimer: null, watchTimer: null, step: 0,
-  MAX_RETRIES: 6,
+  offline: false, pendingCheck: false,
 
   async open(procedureId) {
     Mic.prime();                                // inside the tap that opened the job
@@ -738,8 +907,14 @@ const Guide = {
     $('guide-done').onclick = () => this.check();
     $('guide-repeat').onclick = () => this.send({ type: 'repeat' });
     $('guide-skip').onclick = () => this.send({ type: 'skip' });
+    $('guide-show').onclick = () => { Voice.stop(); this.send({ type: 'show' }); };
+    $('guide-ask').onclick = () => Ask.open();
     LiveBox.start();
     this.connect();
+  },
+
+  kick() {
+    if (this.offline && !this.closing && this.reconnectTimer && !(this.ws && this.ws.readyState <= 1)) this.connect();
   },
 
   /* Open the socket and (re)join the session. On a first connect we `start`;
@@ -747,13 +922,23 @@ const Guide = {
    * from what already passed -- a dropped connection never restarts the job. */
   connect() {
     clearTimeout(this.reconnectTimer);
-    this.ws = new WebSocket(WS_BASE + '/ws/guide');
-    this.ws.binaryType = 'arraybuffer';
+    this.reconnectTimer = null;
+    retire(this.ws);
+    const ws = new WebSocket(WS_BASE + '/ws/guide');
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
     this.ws.onopen = async () => {
       this.retries = 0;
+      this.lastHeard = Date.now();
+      Liveness.watch(ws, () => this.lastHeard);
       this.setBanner('');
       if (this.sessionId) this.send({ type: 'resume', session_id: this.sessionId });
       else this.send({ type: 'start', procedure_id: this.procedureId });
+      // A new socket is a new server session with no view yet: the change
+      // detector must send a full frame first, not a "still" heartbeat, and
+      // a check before that frame lands carries its own.
+      this.lastGray = null;
+      this.haveView = false;
 
       // The live view: one small frame a second for the watcher.
       clearInterval(this.watchTimer);
@@ -774,9 +959,11 @@ const Guide = {
       clearInterval(this.diagTimer);
       this.diagTimer = setInterval(report, 15000);
     };
-    this.ws.onmessage = (evt) => this.handle(JSON.parse(evt.data));
+    this.ws.onmessage = (evt) => { this.lastHeard = Date.now(); this.handle(JSON.parse(evt.data)); };
     this.ws.onerror = () => {};  // onclose drives reconnect
     this.ws.onclose = () => {
+      if (ws !== this.ws) return;
+      Liveness.stop(ws);
       clearInterval(this.watchTimer);
       clearInterval(this.diagTimer);
       // Keep the unlocked audio context: a reconnect has no tap to unlock a new one.
@@ -841,15 +1028,19 @@ const Guide = {
     this.haveView = true;
   },
 
+  /* Keep trying for as long as the job is on screen: the server holds the
+   * worker's place, so whenever the network comes back the job carries on. */
   scheduleReconnect() {
-    if (this.retries >= this.MAX_RETRIES) {
-      this.setBanner('Offline. Your place is saved.', true);
-      return;
-    }
-    const delay = Math.min(1000 * 2 ** this.retries, 8000);
+    const delay = Math.min(1000 * 2 ** this.retries, 5000);
     this.retries += 1;
-    this.setBanner(`Reconnecting (${this.retries})…`, true);
+    if (!this.offline) {
+      this.offline = true;
+      $('guide-instruction').textContent = 'No connection. Keep working. Your place is saved and I will check your work when the connection is back.';
+      Voice.say('Connection lost. Keep working, your place is saved.');
+    }
+    this.setBanner('Offline', true);
     this.setLive('connecting', 'Reconnecting');
+    LiveBox.tracks = {};                 // stale boxes would point at the wrong place
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
   },
 
@@ -880,11 +1071,41 @@ const Guide = {
     switch (msg.type) {
       case 'session':
         this.sessionId = msg.session_id;
-        if (msg.resumed_at) $('guide-instruction').textContent = `Reconnected. Resuming step ${msg.resumed_at}.`;
+        if (msg.resumed_at) {
+          $('guide-instruction').textContent = `Reconnected. Resuming step ${msg.resumed_at}.`;
+          this.toast('Back online');
+        }
+        this.offline = false;
         this.setLive('watching', msg.auto ? 'Watching' : 'Live');
+        if (this.pendingCheck) { this.pendingCheck = false; setTimeout(() => this.check(), 600); }
+        break;
+
+      case 'thinking':
+        Ask.thinking(msg);
+        this.setLive('checking', 'Thinking');
+        break;
+
+      case 'answer':
+        Ask.answered(msg);
+        if (!this.busy) this.setLive('watching', 'Watching');
+        break;
+
+      case 'point':
+        LiveBox.point(msg.label, msg.detections || []);
+        if (!(msg.detections || []).length) this.toast(`Can't see the ${msg.label} in your view`);
+        break;
+
+      case 'reference':
+        RefCard.show(msg);
         break;
 
       case 'speak':
+        if (this.offline) break;             // a late line from the old socket
+        if (msg.aside) {                     // an answer or a pointer: the step stays on screen
+          Voice.say(msg.text);
+          if (!$('ask-panel').className.includes('answered')) Ask.answered({ say: msg.text, tool: 'answer' });
+          break;
+        }
         if (msg.step) {
           $('guide-progress').textContent = `step ${msg.step} / ${msg.of}`;
           if (msg.step !== this.step && msg.target !== undefined) LiveBox.reset(msg.target);
@@ -1019,6 +1240,12 @@ const Guide = {
 
   check() {
     if (this.busy) return;
+    if (!this.ws || this.ws.readyState !== 1) {
+      // Offline: remember the tap and check as soon as the job reconnects.
+      this.pendingCheck = true;
+      this.toast('Offline. I will check this when the connection is back.');
+      return;
+    }
     // The server judges its own live view (already grounded, so it's fast).
     // Before the first view arrives, send one with the request.
     const msg = { type: 'check', said: 'done' };
@@ -1035,11 +1262,16 @@ const Guide = {
 
   teardown() {
     this.closing = true;                 // stop the reconnect loop from firing
+    this.offline = false;
+    this.pendingCheck = false;
     clearInterval(this.diagTimer);
     clearTimeout(this.reconnectTimer);
     clearInterval(this.watchTimer);
     Mic.stop();
+    Ask.close();
+    RefCard.hide();
     if (this.ws) {
+      Liveness.stop(this.ws);
       this.send({ type: 'abort' });
       try { this.ws.close(); } catch (_) {}
       this.ws = null;
@@ -1055,6 +1287,95 @@ const Guide = {
   },
 };
 
+/* ------------------------------------------------------------ ask ustad */
+
+/* The worker can ask anything, any time, by voice ("which one?", "it won't
+ * turn") and the server answers out loud. The Ask button makes sure the next
+ * thing said is taken as a question, and has a box for typing one. */
+const Ask = {
+  open() {
+    Voice.stop();                         // the mic is muted while Ustad talks
+    Guide.send({ type: 'listen' });
+    const p = $('ask-panel');
+    p.hidden = false;
+    p.className = 'ask-panel listening';
+    $('ask-q').textContent = 'Listening. Ask anything about this step.';
+    $('ask-a').textContent = '';
+    this.autoHide(14000);
+  },
+  thinking({ question, coach }) {
+    const p = $('ask-panel');
+    p.hidden = false;
+    p.className = 'ask-panel thinking';
+    $('ask-q').textContent = coach ? 'That is twice now. Here is a tip.' : `“${question}”`;
+    $('ask-a').textContent = 'Thinking…';
+    this.autoHide(20000);
+  },
+  answered({ say, tool, reason, failed }) {
+    const p = $('ask-panel');
+    if (failed) { this.close(); return; }
+    p.hidden = false;
+    p.className = 'ask-panel ' + (tool === 'escalate' ? 'escalate' : 'answered');
+    $('ask-a').textContent = tool === 'escalate' ? `Get a supervisor. ${reason || ''}`.trim() : (say || '');
+    if (tool === 'check_now') $('ask-a').textContent = 'Checking your work…';
+    this.autoHide(tool === 'escalate' ? 15000 : 9000);
+  },
+  autoHide(ms) {
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.close(), ms);
+  },
+  close() {
+    clearTimeout(this.timer);
+    const p = $('ask-panel');
+    if (p) p.hidden = true;
+  },
+};
+
+document.addEventListener('submit', (e) => {
+  if (e.target.id !== 'ask-form') return;
+  e.preventDefault();
+  const input = $('ask-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  input.blur();
+  Guide.send({ type: 'ask', text });
+});
+
+/* "Show me": the expert's own photo of this step, the part boxed on it, so
+ * the worker can match what they see to what the expert saw. */
+const RefCard = {
+  show({ image, box, step, said, target }) {
+    const card = $('ref-card');
+    $('ref-img').src = image;
+    const b = $('ref-box');
+    if (box && box.img_w && box.img_h) {
+      Object.assign(b.style, {
+        left: (box.x1 / box.img_w) * 100 + '%', top: (box.y1 / box.img_h) * 100 + '%',
+        width: ((box.x2 - box.x1) / box.img_w) * 100 + '%', height: ((box.y2 - box.y1) / box.img_h) * 100 + '%',
+      });
+      b.hidden = false;
+      b.dataset.label = target || '';
+    } else {
+      b.hidden = true;
+    }
+    $('ref-title').textContent = `Expert's view · step ${step}`;
+    $('ref-said').textContent = said ? `“${said.length > 160 ? said.slice(0, 157) + '…' : said}”` : '';
+    card.hidden = false;
+    card.classList.remove('big');
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => { if (!card.classList.contains('big')) this.hide(); }, 15000);
+  },
+  hide() { clearTimeout(this.timer); const c = $('ref-card'); if (c) c.hidden = true; },
+};
+
+document.addEventListener('click', (e) => {
+  const card = e.target.closest('#ref-card');
+  if (!card) return;
+  if (e.target.closest('.ref-close')) { RefCard.hide(); return; }
+  card.classList.toggle('big');          // tap to enlarge, tap again to shrink
+});
+
 /* ------------------------------------------------------------ live box */
 
 /* Draws what matters in the operator's view like AR markers, each eased
@@ -1066,6 +1387,7 @@ const STYLE = {
   target: { color: '#3b82ff', prefix: '' },
   hazard: { color: '#ff4d52', prefix: 'Keep clear: ' },
   tool: { color: '#12d98a', prefix: 'Tool: ' },
+  point: { color: '#ffc53d', prefix: 'Here: ' },     // Ask Ustad pointing at something
 };
 
 const LiveBox = {
@@ -1095,6 +1417,11 @@ const LiveBox = {
     this.flashUntil = performance.now() + 900;
   },
   pulse() { this.pulseAt = performance.now(); },
+  /* Ask Ustad points at a part: a gold marker that holds for 7 s. */
+  point(label, dets) {
+    this.tracks.point = { role: 'point', label, dets, at: performance.now(), ttl: 7000, cur: null, alpha: 0 };
+    this.pulseAt = performance.now();
+  },
   danger(label) { this.dangerLabel = label; this.dangerUntil = performance.now() + 2500; },
 
   loop() {
@@ -1118,12 +1445,12 @@ const LiveBox = {
     else { dw = W; dh = dw / vr; ox = 0; oy = (H - dh) / 2; }
     const now = performance.now();
 
-    // hazards first, then tools, then the target on top
-    const order = { hazard: 0, tool: 1, target: 2 };
+    // hazards first, then tools, then the target, and a pointed-at part on top
+    const order = { hazard: 0, tool: 1, target: 2, point: 3 };
     Object.values(this.tracks).sort((a, b) => order[a.role] - order[b.role]).forEach((t) => {
       const best = (t.dets || []).length
         ? t.dets.reduce((a, b) => ((b.confidence || 0) > (a.confidence || 0) ? b : a)) : null;
-      const want = best && now - t.at < 3000 ? 1 : 0;
+      const want = best && now - t.at < (t.ttl || 3000) ? 1 : 0;
       t.alpha += (want - t.alpha) * 0.12;
       if (best) {
         const r = {
@@ -1158,7 +1485,7 @@ const LiveBox = {
     } else {
       const L = Math.max(12, Math.min(w, h) * (t.role === 'tool' ? 0.2 : 0.26));
       ctx.lineWidth = t.role === 'tool' ? 3 : 4;
-      ctx.shadowColor = color; ctx.shadowBlur = t.role === 'target' ? 12 : 6;
+      ctx.shadowColor = color; ctx.shadowBlur = t.role === 'tool' ? 6 : 12;
       ctx.beginPath();
       ctx.moveTo(x, y + L); ctx.lineTo(x, y); ctx.lineTo(x + L, y);
       ctx.moveTo(x + w - L, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + L);
@@ -1168,7 +1495,7 @@ const LiveBox = {
       ctx.shadowBlur = 0;
     }
 
-    if (t.role === 'target') {
+    if (t.role === 'target' || t.role === 'point') {
       const since = now - this.pulseAt;
       if (since < 1400) {
         const k = since / 1400;
@@ -1188,7 +1515,7 @@ const LiveBox = {
       const ly = y > lh + 8 ? y - lh - 8 : y + h + 8;
       ctx.fillStyle = color;
       roundRect(ctx, lx, ly, tw + 22, lh, lh / 2); ctx.fill();
-      ctx.fillStyle = t.role === 'tool' ? '#052414' : '#fff';
+      ctx.fillStyle = t.role === 'tool' ? '#052414' : t.role === 'point' ? '#2a1d00' : '#fff';
       ctx.fillText(label, lx + 11, ly + lh * 0.68);
     }
   },
@@ -1223,18 +1550,21 @@ const Report = {
       ? (timed.reduce((a, e) => a + e.latency_ms, 0) / timed.length / 1000).toFixed(1)
       : '0';
 
+    const asked = events.filter((e) => e.verdict === 'asked' || e.verdict === 'help').length;
     body.innerHTML =
       `<div class="kpis">
          <div class="kpi"><b>${passes}</b><span>verified${autos ? ` (${autos} auto)` : ''}</span></div>
          <div class="kpi"><b>${fails}</b><span>caught</span></div>
-         <div class="kpi"><b>${avg} s</b><span>per check</span></div>
-       </div>`;
+         <div class="kpi"><b>${asked ? asked : avg + ' s'}</b><span>${asked ? 'questions answered' : 'per check'}</span></div>
+       </div>
+       <a class="pack-link" href="/evidence?s=${encodeURIComponent(sessionId)}" target="_blank" rel="noopener">Open the evidence pack</a>`;
 
+    const LABEL = { asked: 'question', help: 'supervisor needed', notice: 'notice' };
     events.forEach((e) => {
       const card = document.createElement('div');
       card.className = 'card event ' + e.verdict;
       const title = document.createElement('h3');
-      title.textContent = `Step ${e.step_index + 1}: ${e.verdict}`;
+      title.textContent = `Step ${e.step_index + 1}: ${LABEL[e.verdict] || e.verdict}`;
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent = e.reason || '';
@@ -1256,6 +1586,12 @@ function flash(verdict) {
   const el = $('verdict-flash');
   el.className = 'verdict-flash ' + verdict;
   setTimeout(() => { el.className = 'verdict-flash'; }, 700);
+}
+
+function bytesToBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
 }
 
 function blobToBase64(blob) {

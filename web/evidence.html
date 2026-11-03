@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ustad · Evidence pack</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230064E0'/%3E%3Ctext x='16' y='23' font-size='19' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='800'%3EU%3C/text%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --blue:#0064e0; --ink:#0a1020; --ink-soft:#33405c; --muted:#64728c; --line:#dbe6f7;
+    --cloud:#f6f9ff; --ok:#12a06a; --bad:#e5484d; --warn:#e8900a; --gold:#c98a00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--cloud);color:var(--ink);font:15px/1.5 "Figtree",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .page{max-width:900px;margin:0 auto;padding:28px 20px 60px}
+  .toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}
+  .brand i{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--blue);color:#fff;font-style:normal;font-size:16px}
+  button.print{font:inherit;font-weight:700;padding:10px 16px;border-radius:10px;border:none;background:var(--blue);color:#fff;cursor:pointer}
+  .sheet{background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px;box-shadow:0 6px 24px rgba(10,50,120,.07)}
+  h1{margin:0 0 4px;font-size:26px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:14px}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px 18px;margin:20px 0;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .facts div{font-size:13px;color:var(--muted)}
+  .facts b{display:block;color:var(--ink);font-size:15px;font-weight:600}
+  .outcome{display:inline-block;padding:4px 12px;border-radius:999px;font-weight:700;font-size:13px}
+  .outcome.ok{background:#eafaf2;color:var(--ok)} .outcome.warn{background:#fdf4e3;color:var(--warn)} .outcome.bad{background:#fdecec;color:var(--bad)}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:24px}
+  .kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .kpi b{display:block;font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+  .kpi span{font-size:12px;color:var(--muted)}
+  .step{display:grid;grid-template-columns:1fr 240px;gap:18px;padding:18px 0;border-top:1px solid var(--line);break-inside:avoid}
+  .step h3{margin:0 0 6px;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pill{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;border:1px solid var(--line)}
+  .pill.pass,.pill.confirmed{color:var(--ok);border-color:#bfe6d4;background:#eafaf2}
+  .pill.inferred{color:var(--blue);border-color:#c4dcff;background:#eef5ff}
+  .pill.skipped,.pill.not-reached{color:var(--muted);background:#f3f5f9}
+  .pill.fail{color:var(--bad);border-color:#f6c9cb;background:#fdecec}
+  .kv{font-size:13px;color:var(--ink-soft);margin:3px 0}
+  .kv b{color:var(--ink);font-weight:600}
+  ol.trail{margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--ink-soft)}
+  ol.trail li{margin:3px 0}
+  ol.trail .t{color:var(--muted);font-variant-numeric:tabular-nums}
+  .qa{margin-top:8px;padding:8px 10px;border-radius:10px;background:#fff8e6;border:1px solid #f3dfa6;font-size:13px}
+  .photo{position:relative;line-height:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#000}
+  .photo img{width:100%;height:auto;display:block}
+  .photo .box{position:absolute;border:3px solid #3b82ff;border-radius:6px}
+  .photo.fail .box{border-color:var(--bad)}
+  .nophoto{height:150px;border:1px dashed var(--line);border-radius:12px;display:grid;place-items:center;color:var(--muted);font-size:12px;text-align:center;padding:10px}
+  .cap{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.4}
+  .how{margin-top:26px;padding-top:16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+  .how b{color:var(--ink-soft)}
+  .empty{padding:60px 20px;text-align:center;color:var(--muted)}
+  @media(max-width:640px){.step{grid-template-columns:1fr}.sheet{padding:18px}}
+  @media print{
+    body{background:#fff}.toolbar{display:none}.page{padding:0;max-width:none}
+    .sheet{border:none;box-shadow:none;padding:0}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="toolbar">
+    <div class="brand"><i>U</i>Ustad evidence pack</div>
+    <button class="print" onclick="window.print()">Print or save as PDF</button>
+  </div>
+  <div class="sheet" id="sheet"><div class="empty">Loading…</div></div>
+</div>
+<script>
+'use strict';
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const when = (ts) => ts ? new Date(ts * 1000).toLocaleString() : 'n/a';
+const clock = (ts) => ts ? new Date(ts * 1000).toLocaleTimeString() : '';
+const dur = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)} min ${s % 60} s`; };
+const VERB = { pass: 'Verified', confirmed: 'Confirmed by operator', inferred: 'Credited from a later view',
+  skipped: 'Skipped', fail: 'Error caught', retry: 'Asked for a better view', asked: 'Question',
+  help: 'Supervisor requested', notice: 'Notice' };
+const OUTCOME = { completed: ['Completed', 'ok'], completed_with_skips: ['Completed with skips', 'warn'],
+  aborted: ['Stopped before the end', 'bad'] };
+
+/* The SAM box on the evidence photo, positioned in percent of the image. */
+function photo(e) {
+  if (!e || !e.evidence_path) return '<div class="nophoto">No photo for this step<br>(confirmed by voice, skipped, or not reached)</div>';
+  const d = (e.detections || []).reduce((a, b) => (!a || (b.confidence || 0) > (a.confidence || 0) ? b : a), null);
+  const box = d && d.img_w ? `<span class="box" style="left:${d.x1 / d.img_w * 100}%;top:${d.y1 / d.img_h * 100}%;width:${(d.x2 - d.x1) / d.img_w * 100}%;height:${(d.y2 - d.y1) / d.img_h * 100}%"></span>` : '';
+  return `<div class="photo ${esc(e.verdict)}"><img src="/${esc(e.evidence_path)}" alt="Evidence photo">${box}</div>
+    <div class="cap">${esc(VERB[e.verdict] || e.verdict)} at ${esc(clock(e.created_at))}${d ? ', part located by SAM 3.1' : ''}</div>`;
+}
+
+async function load() {
+  const sid = new URLSearchParams(location.search).get('s');
+  const sheet = document.getElementById('sheet');
+  if (!sid) { sheet.innerHTML = '<div class="empty">No job given. Open this from a session report.</div>'; return; }
+  const r = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/pack');
+  if (!r.ok) { sheet.innerHTML = '<div class="empty">This job could not be found.</div>'; return; }
+  const data = await r.json();
+  const s = data.session, p = data.procedure, events = data.events || [];
+  document.title = `Evidence: ${p.title}`;
+
+  const by = {};
+  events.forEach((e) => (by[e.step_index] = by[e.step_index] || []).push(e));
+  const DONE = ['pass', 'confirmed', 'inferred', 'skipped'];
+  const final = (i) => { const done = (by[i] || []).filter((e) => DONE.includes(e.verdict)); return done[done.length - 1]; };
+  const count = (v) => p.steps.filter((_, i) => (final(i) || {}).verdict === v).length;
+  const caught = events.filter((e) => e.verdict === 'fail').length;
+  const firstTime = p.steps.filter((_, i) => {
+    const tries = (by[i] || []).filter((e) => ['pass', 'fail', 'retry', 'confirmed'].includes(e.verdict));
+    return tries.length && ['pass', 'confirmed'].includes(tries[0].verdict);
+  }).length;
+  const questions = events.filter((e) => e.verdict === 'asked' || e.verdict === 'help').length;
+  const [olabel, ocls] = OUTCOME[s.outcome] || [s.finished_at ? s.outcome : 'In progress', 'warn'];
+  const length = s.finished_at ? dur(s.finished_at - s.started_at) : 'n/a';
+
+  let html = `<h1>${esc(p.title)}</h1>
+    <div class="sub">${p.machine ? esc(p.machine) + ' · ' : ''}procedure version ${esc(p.version)} · job ${esc(s.id)}</div>
+    <div class="facts">
+      <div>Outcome<b><span class="outcome ${ocls}">${esc(olabel)}</span></b></div>
+      <div>Operator<b>${esc(s.worker_name || 'not recorded')}</b></div>
+      <div>Started<b>${esc(when(s.started_at))}</b></div>
+      <div>Finished<b>${esc(when(s.finished_at))}</b></div>
+      <div>Time on the job<b>${esc(length)}</b></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><b>${count('pass') + count('inferred')}</b><span>verified on camera</span></div>
+      <div class="kpi"><b>${count('confirmed')}</b><span>confirmed by operator</span></div>
+      <div class="kpi"><b>${firstTime}/${p.steps.length}</b><span>right first time</span></div>
+      <div class="kpi"><b>${caught}</b><span>errors caught</span></div>
+      <div class="kpi"><b>${count('skipped')}</b><span>skipped</span></div>
+      <div class="kpi"><b>${questions}</b><span>questions asked</span></div>
+    </div>`;
+
+  p.steps.forEach((st, i) => {
+    const evs = by[i] || [];
+    const f = final(i);
+    const status = f ? f.verdict : 'not-reached';
+    const shown = f && f.evidence_path ? f : [...evs].reverse().find((e) => e.evidence_path);
+    const trail = evs.filter((e) => !['asked', 'help'].includes(e.verdict)).map((e) =>
+      `<li><span class="t">${esc(clock(e.created_at))}</span> ${esc(VERB[e.verdict] || e.verdict)}${e.confidence != null ? ` (${Number(e.confidence).toFixed(2)})` : ''}: ${esc(e.reason || '')}${e.backend && e.backend !== 'none' ? ` <span class="t">[${esc(e.backend)}]</span>` : ''}</li>`).join('');
+    const qa = evs.filter((e) => ['asked', 'help'].includes(e.verdict)).map((e) =>
+      `<div class="qa">${e.verdict === 'help' ? '<b>Supervisor requested.</b> ' : ''}${esc(e.reason || '')}</div>`).join('');
+    html += `<section class="step">
+      <div>
+        <h3>${i + 1}. ${esc(st.title)} <span class="pill ${esc(status)}">${esc(f ? (VERB[status] || status) : 'Not reached')}</span></h3>
+        <div class="kv"><b>Instruction:</b> ${esc(st.instruction)}</div>
+        <div class="kv"><b>Done when:</b> ${esc(st.success_criteria || 'n/a')}</div>
+        ${st.hazard ? `<div class="kv"><b>Hazard:</b> ${esc(st.hazard)}</div>` : ''}
+        ${trail ? `<ol class="trail">${trail}</ol>` : ''}
+        ${qa}
+      </div>
+      <div>${photo(shown)}</div>
+    </section>`;
+  });
+
+  html += `<div class="how"><b>How this was checked.</b> Every camera check: SAM 3.1 (${esc(data.models.perception)}) located
+    the part in the operator's view, then ${esc(data.models.reasoning)} decided by calling exactly one tool
+    (verify the step, flag an error, or ask for a better view). The photo above is the frame it judged.
+    Steps that a camera cannot see are labelled "confirmed by operator". Lockout, reading, timed and
+    confirm steps are never credited from a later view. Questions and the answers given are listed under
+    their step. Generated by Ustad from the job record.</div>`;
+  sheet.innerHTML = html;
+}
+load().catch(() => { document.getElementById('sheet').innerHTML = '<div class="empty">Could not load this job.</div>'; });
+</script>
+</body>
+</html>

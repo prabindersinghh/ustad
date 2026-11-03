@@ -1,66 +1,76 @@
 # Status
 
-**Last updated:** 2026-11-03 00:30 IST · **Head:** `b59d3d3` + docs · **Tests:** 74 passing
-**Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $1.29 of the $50 working cap
+**Last updated:** 2026-11-03 13:40 IST · **Head:** see TIMELINE (X-factor commit) · **Tests:** 109 passing
+**Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $1.85 of the $50 working cap
 
 ## In one paragraph
 
-Ustad works end to end on a real iPhone. An expert records a job once
-(camera plus narration). Ustad writes a step-by-step procedure, checks every
-target, hazard and tool phrase against the expert's own footage with SAM 3.1,
-and saves it. A worker then runs the job hands-free. The phone streams about
-one frame a second. SAM 3.1 tracks the target, hazards, tools and hands live,
-and Muse Spark verifies each step with a tool call. Steps auto-advance after
-two confident passes, a voice "done" triggers a check, and a hand near a
-hazard is called out. Safety steps can never be skipped by inference. A
-dashboard shows spend, per-step insights and every session's evidence.
+Ustad works end to end on a real iPhone.
+
+**Capture.** An expert records a job once (camera plus narration). Ustad
+writes a step-by-step procedure that quotes the expert's own words, keeps the
+expert's photo of every step with the part boxed on it, and checks every
+target, hazard and tool phrase against that footage with SAM 3.1.
+
+**Guide.** A worker then runs the job hands-free:
+- SAM 3.1 tracks the target, hazards, tools and hands live.
+- Muse Spark verifies each step by tool call, comparing the live view with
+  the expert's photo.
+- The worker can ask anything ("which one?", "it won't turn"). Ustad answers
+  from the expert's words, points at the part, and shows the expert's photo.
+- After two failed checks it coaches unasked.
+- A dropped network costs nothing. Capture keeps recording and syncs later,
+  and guide resumes at the exact step.
+
+**After the job.** Every job yields a printable evidence pack. Muse Spark reads
+the runs and proposes better procedures. A supervisor approves them, and each
+approval makes a new version.
 
 ## Works, and how we know
 
 | Capability | Evidence |
 |---|---|
 | Capture builds a correct procedure from camera plus narration | Live API run and iPhone runs (e.g. 2026-11-02 23:33, 7 keyframes, 4 steps) |
-| Self-check rewrites target, hazard and tool phrases SAM can't find; unfound ones are marked "not trackable" | Unit tests plus a real SAM probe: "circular saw blade" flagged, "gear" kept |
-| Live guide: grounding about 1 fps, 2 SAM calls in flight, two-pass auto-advance | Live API e2e (`e2e_guide.py`, scratchpad); iPhone end-to-end test 2026-11-02 |
-| Voice: realtime ASR, "done / repeat / skip / why / where", stable-partial trigger (~0.45 s) | Live runs; `tests/test_live.py` intents |
-| Jump-ahead: skipped visual steps credited when the end state proves them | Live probe ("step 4 end state requiring prior pickup") plus tests |
+| Capture keeps each step's expert photo, SAM box and the expert's quoted words | Tests; real capture in the browser 2026-11-03 13:30 saved 4 photos with boxes |
+| Judge compares the live view with the expert's photo | Real photos: 4/4 right with or without the reference, no added latency (6.9 vs 6.8 s median) |
+| **Ask Ustad**: spoken or typed questions answered by tool call (`answer` with `point_at` / `show_reference`, `check_now`, `escalate`) | Real models on real photos: "which cap" pointed and SAM found it, "can I skip" escalated, "I think it's off" checked. 3/3 at both efforts. Browser end to end. 7 tests |
+| "Show me": the expert's photo with the part boxed, plus the live highlight | Browser screenshot 2026-11-03; tests |
+| Coaching after 2 failed checks | Real model coached with the expert's quote and pointed at the cap; test |
+| Capture survives a network drop: keeps recording, syncs frames, marks and narration on rejoin, delivers a procedure built while offline | Browser: 5 offline frames plus 1 mark synced, then a real build. 4 tests |
+| Guide survives a network drop: unlimited retries, "done" tapped offline is checked on reconnect, resumes past skips with the attempt count | Browser: offline, tap, reconnect, correct verdict. Tests |
+| Half-open sockets detected (ping every 7 s, dead after 20 s silent) | Code; pong tested |
+| Evidence pack per job (`/evidence?s=`): steps, photos with SAM boxes, trail, questions, outcome, printable | Browser screenshot; tests |
+| Self-improving procedures: Spark proposes, SAM checks phrases on the expert photo, supervisor approves, new version, history kept | Live run gave 1 evidence-backed suggestion from 1 run. 5 tests, including safety (hazards only added, readings untouchable, stale suggestions refused) |
+| Self-check rewrites target, hazard and tool phrases SAM can't find; unfound ones are marked "not trackable" | Unit tests plus a real SAM probe |
+| Live guide: grounding about 1 fps, 2 SAM calls in flight, two-pass auto-advance | Live API e2e; iPhone 2026-11-02 |
+| Voice: realtime ASR, done / repeat / skip / why / where, plus questions | Live runs; intent and question tests |
 | Safety gate: lockout, reading, timed and confirm steps never inferred | 3 tests; security review fix |
-| Industrial step kinds: visual, reading (range checked server-side), timed, confirm | Complex-machine narration produced all four; tests |
-| Multi-object live view: target (blue), hazard (red), tool (green), hands | Real SAM probe, about 2 to 3 s for 4 parallel calls |
-| Hand-near-hazard alert (spoken, banner, flash) | `hand_near` True on the blade, False when clear (real SAM) |
-| Left-behind tool check at job end | Unit test; real SAM finds the spanner |
-| Recording UX: countdown, clock, pause and resume, mark step, 10 min limit | Browser tests; iPhone |
-| Spend meter and budget guard (live watching off at 95% of cap) | `/api/usage`; test |
-| iPhone camera recovery: black frames never sent, muted or ended track shows Retry | Browser fault-injection tests (2026-11-02 21:49) |
-| Mic self-heals: worklet, then ScriptProcessor, then backup recording | Browser fault-injection: worklet 2.8 s fallback, double failure throws |
-| Phone telemetry (`diag` messages, `/api/clientlog`, `guide close:` summary) | Tests; not yet seen from a real iPhone |
+| Step kinds, multi-object live view, hand-near-hazard, left-behind tools | Earlier commits; tests and real SAM probes |
+| iPhone camera recovery, self-healing mic, phone telemetry | Browser fault injection; tests |
 
 ## Not verified yet (do not claim)
 
-- **Accuracy numbers.** No factory trial yet. `scripts/evaluate.py` is ready.
-  The landing page Proof rows say "in progress" until it runs.
-- **The mic fix on the user's iPhone.** It was built from logs that showed
-  0 bytes of audio from the phone. The next iPhone run's `diag` line will
-  confirm which audio path it lands on.
-- **Muse Glimmer on Modal** (open weights). The code path exists
-  (`REASONING_BACKEND=open`) but has not been deployed. It needs the user's
-  Modal login.
+- **Accuracy numbers.** No factory trial yet; `scripts/evaluate.py` is ready.
+- **The new features on the user's iPhone.** All were tested in a desktop
+  browser with a fake camera and with real models. Next iPhone run: Ask, Show
+  me, and a drop (turn Wi-Fi off mid-job).
+- **The mic fix on the user's iPhone** (the `diag` line will say which path).
+- **Muse Glimmer on Modal.** Needs the user's Modal login.
 
 ## Known issues
 
 | Issue | Impact | Plan |
 |---|---|---|
-| Public URL is a Cloudflare *quick* tunnel: random name, dies on restart | Link changes; error 1033 when stale | Named tunnel or ngrok static domain (user to choose) |
-| A guide session on the iPhone (2026-11-02 23:33) received zero frames | That session checked nothing | Likely a dark view; now spoken to the worker and reported via `diag`. Confirm on the next run |
-| SAM misses drawn or unusual objects by their real name (drawn saw blade read as "gear") | Hazard silently unwatched | Fixed: self-check rewrites or marks "not trackable" |
-| Hand-near-hazard runs at about 1 fps with 2 to 3 s latency | Advisory only, not a safety device | Stated plainly in UI copy and docs; never marketed as a guard |
-| README "Decisions" table predates realtime ASR | Misleading to a reader | Corrected 2026-11-03 |
+| Public URL is a Cloudflare *quick* tunnel: random name, dies on restart | Link changes | Named tunnel or ngrok static domain (user to choose) |
+| An explicit "done" check took about 6.8 s median on 2026-11-03 (2.4 s measured on 11-02 with smaller frames) | Slower tap-to-verdict | Background auto-advance usually beats the tap. Re-measure; consider `minimal` for taps with a fresh grounding |
+| Ask answers take about 3.3 s (`minimal`) | A pause before the answer | "Thinking" shown on screen. Acceptable for now |
+| Server restart loses an in-progress capture take (held in memory) | Phone shows "server restarted, record again" | Persist takes to disk if it matters |
+| Procedures captured before today have no expert photos | Show me and reference judging fall back gracefully | Re-capture demo jobs |
+| Hand-near-hazard runs at about 1 fps with 2 to 3 s latency | Advisory only | Stated plainly; never marketed as a guard |
 
-## Next up (see ROADMAP.md for the full ranked list)
+## Next up (see ROADMAP.md)
 
-1. Confirm the reliability fixes on the iPhone (read the `diag` line).
-2. X-factor build, pending the user's pick: conversational "Ask Ustad",
-   expert reference frames in verification, self-improving procedures,
-   evidence pack.
-3. Stable URL · Glimmer on Modal · factory trial and `evaluate.py` · 3 minute
-   video · **make the repo public**.
+1. User tests on the iPhone: Ask, Show me, Wi-Fi off mid-capture and mid-job.
+2. Re-capture the demo jobs so they carry expert photos and quotes.
+3. Stable URL · Glimmer on Modal · Hindi voice · factory trial and
+   `evaluate.py` · 3 minute video · **make the repo public**.

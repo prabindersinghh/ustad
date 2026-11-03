@@ -98,6 +98,24 @@
   table.usage th{text-align:left;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
   table.usage td{padding:7px 8px;border-bottom:1px solid var(--line)}
   table.usage .num{text-align:right;font-variant-numeric:tabular-nums}
+  .ref{position:relative;width:168px;line-height:0;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:#000;align-self:start}
+  .ref img{width:168px;height:auto;display:block}
+  .ref .box{position:absolute;border:2px solid #ffc53d;border-radius:5px;box-shadow:0 0 0 999px rgba(0,0,0,.25)}
+  .ref small{position:absolute;left:6px;bottom:6px;line-height:1.2;font-size:10.5px;font-weight:700;color:#2a1d00;background:#ffc53d;padding:2px 7px;border-radius:999px}
+  .quote{font-style:italic;color:var(--ink-soft)}
+  .improve{margin-bottom:16px;border:1px solid #c4dcff;border-radius:14px;background:#f5f9ff;padding:14px 16px}
+  .improve h3{margin:0 0 4px;font-size:15px}
+  .improve p{margin:0 0 10px;font-size:13.5px;color:var(--ink-soft)}
+  .btn{font:inherit;font-weight:700;font-size:14px;padding:9px 14px;border-radius:10px;border:none;background:var(--blue);color:#fff;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  .btn:disabled{opacity:.55;cursor:default}
+  .prop{display:grid;grid-template-columns:22px 1fr;gap:10px;padding:10px 0;border-top:1px solid #dbe6f7;font-size:13.5px}
+  .prop input{margin-top:3px;width:16px;height:16px}
+  .prop .f{font-weight:700} .prop .was{color:var(--muted);text-decoration:line-through}
+  .prop .now{color:var(--ink);font-weight:600}
+  .prop .why{color:var(--ink-soft);margin-top:3px} .prop .ev{color:var(--muted);font-size:12.5px;margin-top:2px}
+  .actions{display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap}
+  .packlink{font-size:13px;font-weight:600}
 </style>
 </head>
 <body>
@@ -205,13 +223,68 @@ function specOf(r){
   return r.min!=null ? `${r.what}: at least ${r.min}${u}` : `${r.what}: at most ${r.max}${u}`;
 }
 
+function refPhoto(s){
+  if(!s.ref_image) return `<div class="noimg">no expert photo<br>(older capture)</div>`;
+  const b = s.ref_box;
+  const box = b && b.img_w ? `<span class="box" style="left:${b.x1/b.img_w*100}%;top:${b.y1/b.img_h*100}%;width:${(b.x2-b.x1)/b.img_w*100}%;height:${(b.y2-b.y1)/b.img_h*100}%"></span>` : '';
+  return `<div class="ref"><img loading="lazy" src="/${esc(s.ref_image)}" alt="expert's view">${box}<small>expert's view</small></div>`;
+}
+
+const FIELD = { instruction:'Instruction', success_criteria:'Done when', target_phrase:'Target phrase',
+  common_mistake:'Common mistake', hazard:'Hazard warning', tip:'Add a tip', watch_for:'Watch live' };
+const SAM = { found:'SAM found it on the expert photo', not_found:'SAM could not find it on the expert photo',
+  no_photo:'no expert photo to check against', error:'SAM check failed' };
+
+/* Self-improving procedures: Spark reads the runs, proposes edits, SAM checks
+ * every phrase on the expert's photo, and nothing changes until approved. */
+function improveBox(id, data, runs){
+  const prop = data && data.proposal;
+  const hist = (data && data.history) || [];
+  const histLine = hist.length ? `<p class="muted" style="font-size:12.5px">History: ${hist.map(h=>`v${h.version} replaced ${esc(fmtTime(h.created_at))}`).join(' · ')}</p>` : '';
+  if(prop && prop.status==='open' && prop.items.length){
+    return `<div class="improve" id="improve"><h3>Muse Spark suggests ${prop.items.length} improvement${prop.items.length>1?'s':''}</h3>
+      <p>Based on what happened in the guided runs. Tick the ones to apply; nothing changes until you approve.</p>
+      ${prop.items.map((it,i)=>`<label class="prop"><input type="checkbox" data-i="${i}" ${it.sam_check==='not_found'?'':'checked'}>
+        <div><div class="f">Step ${it.step}: ${esc(FIELD[it.field]||it.field)}${it.role?` (${esc(it.role)})`:''}</div>
+        ${it.before?`<div class="was">${esc(it.before)}</div>`:''}<div class="now">${esc(it.value)}</div>
+        <div class="why">${esc(it.why)}</div>${it.evidence?`<div class="ev">Evidence: ${esc(it.evidence)}</div>`:''}
+        ${it.sam_check?`<div class="ev">${esc(SAM[it.sam_check]||it.sam_check)}</div>`:''}</div></label>`).join('')}
+      <div class="actions"><button class="btn" onclick="applyImprove('${id}','${prop.id}')">Approve selected</button>
+        <button class="btn ghost" onclick="applyImprove('${id}','${prop.id}',true)">Dismiss all</button>
+        <span id="improve-msg" class="muted"></span></div>${histLine}</div>`;
+  }
+  const note = prop && prop.status==='open' && !prop.items.length ? 'Last look found nothing to change. ' : '';
+  return `<div class="improve" id="improve"><h3>Improve this procedure</h3>
+    <p>${note}${runs ? `Muse Spark reads the ${runs} guided run${runs>1?'s':''} (errors caught, questions asked, skips, slow steps) and proposes clearer steps. You approve each change.`
+                     : 'Run it with a worker first. Suggestions come from what happens in real runs.'}</p>
+    <div class="actions"><button class="btn" ${runs?'':'disabled'} onclick="askImprove('${id}', this)">Suggest improvements</button>
+    <span id="improve-msg" class="muted"></span></div>${histLine}</div>`;
+}
+
+async function askImprove(id, btn){
+  btn.disabled = true; $('improve-msg').textContent = 'Muse Spark is reading the runs…';
+  const r = await fetch(`/api/procedures/${id}/improve`, {method:'POST'});
+  if(!r.ok){ const e = await r.json().catch(()=>({})); $('improve-msg').textContent = e.detail || 'Could not get suggestions.'; btn.disabled=false; return; }
+  showProcedure(id);
+}
+
+async function applyImprove(id, prid, dismiss){
+  const accept = dismiss ? [] : [...document.querySelectorAll('#improve input[type=checkbox]:checked')].map(x=>+x.dataset.i);
+  const r = await fetch(`/api/procedures/${id}/proposals/${prid}/apply`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({accept})});
+  const out = await r.json().catch(()=>({}));
+  if(!r.ok){ $('improve-msg').textContent = out.detail || 'Could not apply.'; return; }
+  showProcedure(id);
+}
+
 async function showProcedure(id){
-  const [p, ins] = await Promise.all([getJSON('/api/procedures/'+id), getJSON(`/api/procedures/${id}/insights`).catch(()=>null)]);
+  const [p, ins, imp] = await Promise.all([getJSON('/api/procedures/'+id), getJSON(`/api/procedures/${id}/insights`).catch(()=>null),
+    getJSON(`/api/procedures/${id}/improve`).catch(()=>null)]);
   const stat = {}; (ins && ins.steps || []).forEach((s)=>{ stat[s.step] = s; });
   const hardest = ins && ins.hardest_step ? p.steps[ins.hardest_step-1] : null;
   let html = `<section class="panel"><h2>${esc(p.title)}
-      <span class="count">${p.steps.length} steps${p.machine?' · '+esc(p.machine):''}${ins&&ins.runs?` · ${ins.runs} guided run${ins.runs>1?'s':''}`:''}</span></h2>
+      <span class="count">${p.steps.length} steps · v${p.version||1}${p.machine?' · '+esc(p.machine):''}${ins&&ins.runs?` · ${ins.runs} guided run${ins.runs>1?'s':''}`:''}</span></h2>
       <div style="padding:16px 18px">`;
+  html += improveBox(id, imp, ins && ins.runs);
   if(hardest){
     const h = stat[ins.hardest_step];
     html += `<div class="struggle"><b>Where operators struggle: step ${ins.hardest_step}, ${esc(hardest.title)}.</b>
@@ -233,9 +306,12 @@ async function showProcedure(id){
         ${(s.watch_for||[]).length?`<div class="kv"><b>Watched live:</b> ${s.watch_for.map((w)=>`<span class="pill ${w.role==='hazard'?'bad':'ok'}">${w.role==='hazard'?'Keep clear':'Tool'}: ${esc(w.phrase)}${w.trackable===false?' (not trackable on camera)':''}</span>`).join(' ')}</div>`:''}
         ${s.common_mistake?`<div class="kv"><b>Common mistake:</b> ${esc(s.common_mistake)}</div>`:''}
         ${s.hazard?`<div class="kv"><b>Hazard:</b> ${esc(s.hazard)}</div>`:''}
-        ${st?`<div class="kv stepstat">${Math.round((st.first_try_rate||0)*100)}% right first time · ${st.caught} caught${st.inferred?` · ${st.inferred} inferred`:''}${st.skipped?` · ${st.skipped} skipped`:''}${st.median_s!=null?` · ${st.median_s} s median`:''}</div>`:''}
+        ${s.expert_said?`<div class="kv"><b>Expert said:</b> <span class="quote">"${esc(s.expert_said)}"</span></div>`:''}
+        ${(s.tips||[]).length?`<div class="kv"><b>Tips from runs:</b> ${s.tips.map(esc).join(' · ')}</div>`:''}
+        ${st?`<div class="kv stepstat">${Math.round((st.first_try_rate||0)*100)}% right first time · ${st.caught} caught${st.inferred?` · ${st.inferred} inferred`:''}${st.skipped?` · ${st.skipped} skipped`:''}${st.asked?` · ${st.asked} question${st.asked>1?'s':''}`:''}${st.median_s!=null?` · ${st.median_s} s median`:''}</div>`:''}
+        ${st&&st.questions&&st.questions.length?`<div class="kv muted">Asked: ${st.questions.map(q=>esc(q.split(' | ')[0].replace(/^Q: /,''))).join(' · ')}</div>`:''}
       </div>
-      <div class="noimg">grounded by<br>SAM 3.1</div>
+      ${refPhoto(s)}
     </div>`;
   });
   html += `</div></div></section>`;
@@ -269,11 +345,12 @@ async function showSession(id){
   const sess = data.session||{}; const events = data.events||[];
   const passes = events.filter(e=>e.verdict==='pass').length;
   const fails = events.filter(e=>e.verdict==='fail').length;
-  const avg = events.length ? Math.round(events.reduce((a,e)=>a+(e.latency_ms||0),0)/events.length) : 0;
+  const checks = events.filter(e=>['pass','fail','retry'].includes(e.verdict) && e.latency_ms);
+  const avg = checks.length ? Math.round(checks.reduce((a,e)=>a+e.latency_ms,0)/checks.length) : 0;
 
   let html = `<section class="panel"><h2>Session: ${esc(sess.procedure_title||sess.procedure_id||'')}
       <span class="count">${passes} passed · ${fails} caught · ${avg}ms avg ·
-      ${dur(sess.started_at,sess.finished_at)}</span></h2>
+      ${dur(sess.started_at,sess.finished_at)} · <a class="packlink" href="/evidence?s=${encodeURIComponent(id)}" target="_blank" rel="noopener">evidence pack</a></span></h2>
       <div style="padding:16px 18px"><div class="steps">`;
   if(!events.length) html += '<div class="empty">No step events recorded.</div>';
   events.forEach((e)=>{
@@ -284,7 +361,7 @@ async function showSession(id){
     html += `<div class="step ${esc(e.verdict)}">
       <div>
         <div class="h">Step ${e.step_index+1}
-          <span class="pill ${({pass:'ok',confirmed:'ok',fail:'bad',inferred:'kind',notice:'bad'})[e.verdict]||'warn'}">${esc(e.verdict)}${conf}</span>
+          <span class="pill ${({pass:'ok',confirmed:'ok',fail:'bad',inferred:'kind',notice:'bad',help:'bad',asked:'kind'})[e.verdict]||'warn'}">${esc(({asked:'question',help:'supervisor needed'})[e.verdict]||e.verdict)}${conf}</span>
           ${e.backend?`<span class="pill backend">${esc(e.backend)}</span>`:''}
           ${e.latency_ms?`<span class="muted" style="font-size:12px">${e.latency_ms}ms</span>`:''}
         </div>

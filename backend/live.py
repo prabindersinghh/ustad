@@ -36,7 +36,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from . import config, db, guide, meta_client, procedures, sam_parse
-from .realtime import VoiceRelay, intent_of
+from .realtime import VoiceRelay, intent_of, is_question
 
 log = logging.getLogger("ustad.live")
 
@@ -157,6 +157,12 @@ class GuideSession:
         self.counts = {"frames": 0, "dark": 0, "audio_bytes": 0}   # logged at close
         self.dark_said = 0.0
         self.diag_gate = _RateGate(6, 60.0)     # the phone sends one every 15 s
+        # Ask Ustad
+        self.asking: asyncio.Task | None = None
+        self.listen_until = 0.0                 # Ask button: the next utterance is a question
+        self.ask_gate = _RateGate(8, 60.0)      # each answer is a model call
+        self.fails: dict[int, list[str]] = {}   # step index -> what went wrong, for coaching
+        self.coached: set[int] = set()
 
     # ---- helpers ---------------------------------------------------------
     @property
@@ -191,7 +197,17 @@ class GuideSession:
             step=self.idx + 1, of=len(self.proc["steps"]),
             title=step.get("title", ""), target=step.get("target_phrase", ""),
             kind=kind, reading=spec, duration=duration if kind == "timed" else 0,
+            ref=bool(step.get("ref_image")),
         )
+
+    def _reference_msg(self, step: dict[str, Any]) -> dict[str, Any] | None:
+        """The expert's photo of this step, with where the part sits in it."""
+        rel = step.get("ref_image")
+        if not rel:
+            return None
+        return {"type": "reference", "step": step.get("index", self.idx) + 1,
+                "image": "/" + str(rel).lstrip("/"), "box": step.get("ref_box"),
+                "target": step.get("target_phrase", ""), "said": step.get("expert_said") or ""}
 
     def _upcoming(self) -> list[dict[str, Any]]:
         assert self.proc is not None
@@ -203,8 +219,9 @@ class GuideSession:
             return 0.0
         return max(0.0, float(step.get("duration_s") or 0) - (time.monotonic() - self.step_started))
 
-    async def _begin(self, proc: dict[str, Any], session_id: str, idx: int, resumed: bool) -> None:
-        self.proc, self.session_id, self.idx, self.attempt = proc, session_id, idx, 1
+    async def _begin(self, proc: dict[str, Any], session_id: str, idx: int, resumed: bool,
+                     attempt: int = 1) -> None:
+        self.proc, self.session_id, self.idx, self.attempt = proc, session_id, idx, attempt
         msg: dict[str, Any] = {
             "type": "session", "session_id": session_id, "title": proc["title"],
             "steps": len(proc["steps"]), "voice": config.VOICE, "auto": config.AUTO_ADVANCE,
@@ -225,12 +242,14 @@ class GuideSession:
             if not proc:
                 await self.out.send({"type": "error", "message": "Unknown procedure"})
                 return True
-            sid = db.start_session(proc["id"], msg.get("worker"), "guide")
+            sid = db.start_session(proc["id"], msg.get("worker"), "guide", version=proc.get("version"))
             await self._begin(proc, sid, 0, resumed=False)
 
         elif kind == "resume":
             # The server, not the client, decides where the worker is: resume
-            # just past the last step that passed.
+            # just past the last step that was finished (passed, inferred,
+            # confirmed or skipped), with the attempt count and skips intact,
+            # so a dropped connection costs the worker nothing.
             sid = msg.get("session_id")
             record = db.session_log(sid) if sid else {"session": None, "events": []}
             if not record["session"]:
@@ -240,14 +259,39 @@ class GuideSession:
             if not proc:
                 await self.out.send({"type": "error", "message": "Unknown procedure"})
                 return True
-            passed = [e["step_index"] for e in record["events"]
-                      if e["verdict"] in ("pass", "inferred", "confirmed")]
-            idx = (max(passed) + 1) if passed else 0
-            if idx >= len(proc["steps"]):
+            if record["session"].get("finished_at"):
                 self.session_id = sid
                 await self.out.send({"type": "complete", "session_id": sid})
                 return True
-            await self._begin(proc, sid, idx, resumed=True)
+            events = record["events"]
+            done = [e["step_index"] for e in events if e["verdict"] in db.DONE_VERDICTS]
+            idx = (max(done) + 1) if done else 0
+            self.skipped = sorted({e["step_index"] for e in events if e["verdict"] == "skipped"})
+            for e in events:
+                if e["verdict"] == "fail" and e["step_index"] == idx:
+                    self.fails.setdefault(idx, []).append(e["reason"] or "")
+            if idx >= len(proc["steps"]):
+                self.proc, self.session_id = proc, sid
+                await self._complete(None)
+                return True
+            tries = sum(1 for e in events if e["step_index"] == idx and e["verdict"] in db.CHECK_VERDICTS)
+            log.info("guide resume: session %s at step %d (attempt %d)", sid, idx + 1, tries + 1)
+            await self._begin(proc, sid, idx, resumed=True, attempt=tries + 1)
+
+        elif kind == "ping":
+            await self.out.send({"type": "pong"})
+
+        elif kind == "listen":
+            # The Ask button: whatever the worker says next is a question.
+            self.listen_until = time.monotonic() + 12
+
+        elif kind == "ask":
+            text = " ".join(str(msg.get("text") or "").split())[:300]
+            if text:
+                await self.ask(text, source="typed")
+
+        elif kind == "show":
+            await self.point()
 
         elif kind == "watch":
             self.latest = (decode_frame(msg["data"]), time.monotonic())
@@ -320,8 +364,22 @@ class GuideSession:
         if time.monotonic() - getattr(self, "_fired_at", 0.0) < 4.0 and intent_of(text) == "done":
             return                                # the partial already triggered it
         intent = intent_of(text)
-        log.info("voice %r -> %s", text, intent)
-        if intent == "done":
+        words = text.lower().split()
+        # "What's next?" holds "next", but it's a question, not a "done".
+        if intent == "done" and words and words[0].strip("',.?") in ("how", "what", "what's", "which", "why",
+                                                                      "where", "when", "can", "should", "do", "does"):
+            intent = None
+        # "Where is it" points at the target; "where's the spanner" needs Spark.
+        if intent == "where" and len(words) > 3:
+            intent = None
+        listening = time.monotonic() < self.listen_until
+        if listening and intent not in ("done", "skip", "repeat"):
+            intent = None
+        log.info("voice %r -> %s", text, intent or ("ask" if listening or is_question(text) else "-"))
+        if intent is None and (listening or is_question(text)):
+            self.listen_until = 0.0
+            await self.ask(text, source="voice")
+        elif intent == "done":
             self._fired_at = time.monotonic()
             asyncio.create_task(self.check(None, said=text, source="voice"))
         elif intent == "repeat":
@@ -349,16 +407,131 @@ class GuideSession:
         await self.check(None, said=text, source="voice")
 
     async def point(self) -> None:
-        """Say where the target is, from the latest live grounding."""
-        target = self.step.get("target_phrase") or "the part"
+        """"Where is it?" / "Show me": highlight the target in the live view
+        and show the expert's own photo of the step with the part boxed."""
+        if self.proc is None:
+            return
+        step = self.step
+        target = step.get("target_phrase") or "the part"
+        ref = self._reference_msg(step)
+        if ref:
+            await self.out.send(ref)
         g = self.grounding
         if g and g.gen == self.gen and g.detections:
             best = max(g.detections, key=lambda d: (d.confidence or 0, d.area_fraction))
             where = best.describe().split(",")[0]
             await self.out.send({"type": "pulse"})
-            await self.speak(f"The {target} is at the {where} of your view. It's highlighted.")
+            await self.speak(f"The {target} is at the {where} of your view. It's highlighted.", aside=True)
+        elif ref and isinstance(ref.get("box"), dict):
+            box = ref["box"]
+            try:
+                where = sam_parse.Detection(**{k: box[k] for k in (
+                    "frame", "ordinal", "x1", "y1", "x2", "y2", "img_w", "img_h")}).describe().split(",")[0]
+            except (KeyError, TypeError):
+                where = ""
+            hint = f", at the {where} of the expert's view" if where else ""
+            await self.speak(f"I can't see the {target} in your view yet. Here it is in the expert's video{hint}. "
+                             "Point the camera there.", aside=True)
+        elif ref:
+            await self.speak(f"I can't see the {target} yet. This is how the expert's view looked. Point the camera there.", aside=True)
         else:
-            await self.speak(f"I can't see the {target} yet. Point the camera at the work.")
+            await self.speak(f"I can't see the {target} yet. Point the camera at the work.", aside=True)
+
+    # ---- Ask Ustad -----------------------------------------------------------
+    async def ask(self, question: str, *, source: str, coach: bool = False) -> None:
+        """Answer a question (or coach after repeated fails) with one Spark
+        tool call, then act on it: speak, point, show the expert's photo,
+        run a check, or call a supervisor."""
+        if self.proc is None or self.session_id is None or self.finished:
+            return
+        if self.asking and not self.asking.done():
+            return                                   # one answer at a time
+        if not self.ask_gate.allow():
+            await self.speak("Give me a moment, then ask again.")
+            return
+        # Its own task: the voice reader that heard the question keeps
+        # transcribing while Spark thinks.
+        self.asking = asyncio.create_task(self._answer(question, source=source, coach=coach))
+
+    async def _answer(self, question: str, *, source: str, coach: bool) -> None:
+        assert self.proc is not None and self.session_id is not None
+        gen0, idx = self.gen, self.idx
+        await self.out.send({"type": "thinking", "question": question, "coach": coach})
+        g = self.grounding
+        frame = g.frame if g and g.gen == gen0 else (self.latest[0] if self.latest else None)
+        grounding = ""
+        if g and g.gen == gen0:
+            grounding = sam_parse.summarise(self.step.get("target_phrase") or "target", g.detections)
+            grounding += ("\n" + g.context) if g.context else ""
+        try:
+            ans = await asyncio.to_thread(
+                guide.answer_question, self.proc, idx, question, frame,
+                grounding=grounding, what_went_wrong=self.fails.get(idx), coach=coach)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("ask failed: %s", exc)
+            await self.out.send({"type": "answer", "say": "", "failed": True})
+            await self.speak("Sorry, I couldn't work that out. Ask me again.")
+            return
+        if self.finished:
+            return
+        log.info("ask (%s) %r -> %s in %dms%s", source if not coach else "coach", question[:80], ans["tool"],
+                 ans["latency_ms"], f" point_at={ans['point_at']!r}" if ans["point_at"] else "")
+        n = len(self.proc["steps"])
+        q = "(coaching after repeated fails)" if coach else question
+
+        if ans["tool"] == "check_now" and gen0 == self.gen:
+            await self.out.send({"type": "answer", "say": ans["say"], "tool": "check_now"})
+            await self.check(None, said=question, source="voice")
+            return
+        if ans["tool"] == "escalate":
+            db.log_step_event(self.session_id, idx, "help",
+                              reason=f"Q: {clean_for_log(q, 200)} | {ans['reason'] or 'needs a supervisor'}")
+            await self.out.send({"type": "answer", "say": ans["say"], "tool": "escalate",
+                                 "reason": ans["reason"] or ""})
+            await self.speak(ans["say"] or "Stop here and get your supervisor.", step=idx + 1, of=n, aside=True)
+            return
+
+        db.log_step_event(self.session_id, idx, "asked",
+                          reason=f"Q: {clean_for_log(q, 200)} | A: {clean_for_log(ans['say'], 300)}",
+                          latency_ms=ans["latency_ms"])
+        await self.out.send({"type": "answer", "say": ans["say"], "tool": "answer", "coach": coach,
+                             "latency_ms": ans["latency_ms"]})
+        if ans["say"]:
+            await self.speak(ans["say"], step=idx + 1, of=n, aside=True)
+        if gen0 != self.gen:
+            return                                   # the step moved on while thinking
+        if ans["point_at"] and frame:
+            label = ans["point_at"]
+            try:
+                dets = await asyncio.to_thread(meta_client.segment, label, frame)
+                # A wordy phrase ("white cap on the bottle in your hand") can
+                # miss where the step's own target phrase, already proven on
+                # the expert's footage, hits. Fall back to it when they overlap.
+                target = self.step.get("target_phrase") or ""
+                if not dets and target and target != label and set(target.lower().split()) & set(label.lower().split()):
+                    label = target
+                    dets = await asyncio.to_thread(meta_client.segment, label, frame)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("point grounding failed: %s", exc)
+                dets = []
+            ans["point_at"] = label
+            await self.out.send({"type": "point", "label": ans["point_at"],
+                                 "detections": [d.to_dict() for d in dets]})
+            if not dets and self.step.get("ref_image"):
+                ans["show_reference"] = True         # not in view: show where it was for the expert
+        if ans["show_reference"] or coach:
+            ref = self._reference_msg(self.step)
+            if ref:
+                await self.out.send(ref)
+
+    async def _maybe_coach(self, idx: int) -> None:
+        """After repeated fails on one step, coach once, unasked."""
+        if idx in self.coached or len(self.fails.get(idx, [])) < config.COACH_AFTER_FAILS:
+            return
+        self.coached.add(idx)
+        await asyncio.sleep(1.5)                     # let the correction be heard first
+        if self.idx == idx and not self.finished:
+            await self.ask("", source="coach", coach=True)
 
     # ---- watcher -------------------------------------------------------------
     async def _watch(self) -> None:
@@ -607,6 +780,9 @@ class GuideSession:
             self.auto_streak = 0
             if action["verdict"] == "fail":
                 self.last_flag = action["detail"]
+                self.fails.setdefault(self.idx, []).append(
+                    action["detail"].get("what_is_wrong") or action.get("say") or "")
+                asyncio.create_task(self._maybe_coach(self.idx))
 
     async def _complete(self, frame: bytes | None) -> None:
         """End of the job. If steps were skipped, look at the finished state
@@ -678,7 +854,7 @@ class GuideSession:
         log.info("guide close: session %s, step %d, %d frames, %d dark, %d audio bytes",
                  self.session_id, self.idx + 1, self.counts["frames"], self.counts["dark"],
                  self.counts["audio_bytes"])
-        for t in (self.watcher, self.judging):
+        for t in (self.watcher, self.judging, self.asking):
             if t and not t.done():
                 t.cancel()
         if self.voice:
@@ -702,18 +878,78 @@ def _mmss(seconds: float) -> str:
     return f"{s // 60}:{s % 60:02d}"
 
 
-class CaptureSession:
+# A recording outlives its socket. Phones on a shop floor drop Wi-Fi, so a
+# take is kept here by id while the phone keeps recording offline, and a new
+# socket rejoins it (see CaptureSocket). Takes left alone this long are freed.
+TAKE_TTL_S = 20 * 60
+_TAKES: dict[str, "CaptureSession"] = {}
+
+
+def _prune_takes() -> None:
+    now = time.monotonic()
+    for cid, take in list(_TAKES.items()):
+        if take.detached_at and now - take.detached_at > TAKE_TTL_S:
+            _TAKES.pop(cid, None)
+
+
+class CaptureSocket:
+    """One capture WebSocket. It either starts a take or rejoins one:
+
+      -> {"type":"rejoin","capture_id":"...","at":<phone's job clock>,"paused":bool}
+      <- {"type":"rejoined","frames":N,"state":"recording"|"building"|"done"}
+         or {"type":"rejoin_failed"} when the server no longer has the take.
+    """
+
     def __init__(self, ws: WebSocket) -> None:
         self.out = _Socket(ws)
+        self.take: CaptureSession | None = None
+
+    async def on_text(self, msg: dict[str, Any]) -> bool:
+        kind = msg.get("type")
+        if kind == "ping":
+            await self.out.send({"type": "pong"})
+            return True
+        if kind == "rejoin":
+            take = _TAKES.get(str(msg.get("capture_id") or ""))
+            if take is None:
+                await self.out.send({"type": "rejoin_failed"})
+                return True
+            self.take = take
+            await take.attach(self.out, msg)
+            return True
+        if self.take is None:
+            _prune_takes()
+            self.take = CaptureSession(self.out)
+            _TAKES[self.take.capture_id] = self.take
+        return await self.take.on_text(msg)
+
+    async def on_audio(self, pcm: bytes) -> None:
+        if self.take:
+            await self.take.on_audio(pcm)
+
+    async def close(self) -> None:
+        if self.take:
+            await self.take.detach(self.out)
+
+
+class CaptureSession:
+    def __init__(self, out: "_Socket | WebSocket") -> None:
+        self.out = out if isinstance(out, _Socket) else _Socket(out)
+        self.capture_id = db.new_id()
         self.reset()
         self.voice: VoiceRelay | None = None
         self.diag_gate = _RateGate(6, 60.0)
+        self.state = "idle"                   # idle | recording | building | done
+        self.result: dict[str, Any] | None = None
+        self.detached_at = 0.0
+        self.rejoins = 0
 
     def reset(self) -> None:
         self.keyframes: list[bytes] = []
         self.frame_times: list[float] = []
         self.turns: list[dict[str, Any]] = []
         self.pcm = bytearray()
+        self.gaps: list[tuple[float, bytes]] = []   # (at, pcm) recorded while offline
         self.audio_blobs: list[bytes] = []
         self.audio_mime = "audio/mp4"
         self.hint: str | None = None
@@ -721,6 +957,37 @@ class CaptureSession:
         self.recording = False
         self.paused_at: float | None = None
         self.paused_total = 0.0
+
+    # ---- connection ------------------------------------------------------
+    async def attach(self, out: _Socket, msg: dict[str, Any]) -> None:
+        """A new socket picked this take up after a drop. The phone's job
+        clock is the truth for what happened offline (it may have paused)."""
+        self.out, self.detached_at = out, 0.0
+        self.rejoins += 1
+        at = msg.get("at")
+        if self.recording and isinstance(at, (int, float)) and 0 <= at < 4 * 3600:
+            now = time.monotonic()
+            paused = bool(msg.get("paused"))
+            self.paused_at = now if paused else None
+            self.t0 = now - float(at) - self.paused_total
+        log.info("capture %s rejoined (%d): %s, %d keyframes so far", self.capture_id, self.rejoins,
+                 self.state, len(self.keyframes))
+        await self.out.send({"type": "rejoined", "capture_id": self.capture_id, "state": self.state,
+                             "frames": len(self.keyframes)})
+        if self.result:
+            await self.out.send(self.result)
+
+    async def detach(self, out: _Socket) -> None:
+        if self.out is not out:
+            return                            # an older socket closing after a rejoin
+        self.detached_at = time.monotonic()
+        if self.voice:
+            voice, self.voice = self.voice, None
+            await voice.close()
+        if self.state in ("recording", "building"):
+            log.info("capture %s: socket dropped while %s; keeping the take", self.capture_id, self.state)
+        elif self.state == "done" or not self.keyframes:
+            _TAKES.pop(self.capture_id, None)
 
     def elapsed(self) -> float:
         """Recording time, excluding pauses: what the job clock should show."""
@@ -730,19 +997,25 @@ class CaptureSession:
     async def status(self, message: str) -> None:
         await self.out.send({"type": "status", "message": message})
 
-    async def mark_step(self, source: str) -> None:
-        """The expert marked the start of a new step (button or "next step")."""
-        at = self.elapsed()
-        self.turns.append({"n": None, "text": "[step marker]", "at": at, "frame": max(0, len(self.keyframes) - 1)})
+    async def mark_step(self, source: str, at: float | None = None, quiet: bool = False) -> None:
+        """The expert marked the start of a new step (button or "next step").
+        A mark made offline arrives later with the job-clock time it was made."""
+        at = self.elapsed() if at is None else max(0.0, min(float(at), self.elapsed()))
+        frame = max(0, sum(1 for t in self.frame_times if t <= at) - 1)
+        self.turns.append({"n": None, "text": "[step marker]", "at": at, "frame": frame})
+        self.turns.sort(key=lambda t: t["at"])
         n = sum(1 for t in self.turns if t["text"] == "[step marker]") + 1
-        await self.out.send({"type": "marker", "n": n, "at": _mmss(at), "source": source})
+        if not quiet:
+            await self.out.send({"type": "marker", "n": n, "at": _mmss(at), "source": source})
 
     async def on_text(self, msg: dict[str, Any]) -> bool:
         kind = msg.get("type")
         if kind == "start":
             self.reset()
             self.recording = True
+            self.state = "recording"
             self.hint = msg.get("hint") or None
+            await self.out.send({"type": "capture", "capture_id": self.capture_id})
             await self.status("Recording. Narrate each step as you do it.")
         elif kind == "diag":
             if self.diag_gate.allow():
@@ -758,19 +1031,39 @@ class CaptureSession:
                 await self.out.send({"type": "resumed", "at": _mmss(self.elapsed())})
         elif kind == "mark":
             if self.recording:
-                await self.mark_step("tap")
+                at = msg.get("at")
+                await self.mark_step("tap", at if isinstance(at, (int, float)) else None,
+                                     quiet=bool(msg.get("quiet")))
         elif kind == "frame":
-            if self.paused_at is not None:
+            if self.paused_at is not None and "at" not in msg:
                 return True                       # nothing is captured while paused
+            # Frames buffered on the phone while offline carry the job-clock
+            # time they were taken at; live ones are stamped on arrival.
+            at = self.elapsed()
+            if isinstance(msg.get("at"), (int, float)):
+                lo = self.frame_times[-1] if self.frame_times else 0.0
+                at = min(max(float(msg["at"]), lo), max(at, lo))
             self.keyframes.append(decode_frame(msg["data"]))
-            self.frame_times.append(self.elapsed())
+            self.frame_times.append(at)
             await self.out.send({"type": "frame_ack", "count": len(self.keyframes)})
+        elif kind == "audio_gap":                 # narration recorded while offline
+            try:
+                pcm = base64.b64decode(msg.get("data") or "")
+            except (ValueError, TypeError):
+                pcm = b""
+            if pcm and isinstance(msg.get("at"), (int, float)) and len(self.gaps) < 64:
+                self.gaps.append((float(msg["at"]), pcm[: 16000 * 2 * 600]))
         elif kind == "audio":                 # whole-recording upload (fallback path)
             self.audio_blobs.append(base64.b64decode(msg["data"]))
             self.audio_mime = msg.get("mime", self.audio_mime)
         elif kind == "stop":
-            self.recording = False
-            await self.build()
+            if self.state == "recording":
+                self.recording = False
+                self.state = "building"
+                # Its own task, not this socket's: writing the procedure takes
+                # 30 s or more and must survive the phone losing signal, and
+                # the socket keeps answering pings meanwhile.
+                self.builder = asyncio.create_task(self.build(), name="capture-build")
         elif kind == "close":
             return False
         return True
@@ -827,16 +1120,45 @@ class CaptureSession:
         can line words up with the keyframes captured at the same time."""
         return "\n".join(f"[{_mmss(t['at'])}] {t['text']}" for t in self.turns)
 
+    async def _finish_with(self, msg: dict[str, Any]) -> None:
+        """Deliver the outcome, and keep it for a phone that rejoins later
+        (the socket may have dropped while the procedure was being written)."""
+        self.result = msg
+        self.state = "done"
+        await self.out.send(msg)
+
+    async def _transcribe_gaps(self) -> None:
+        """Narration recorded on the phone while it was offline becomes
+        timestamped turns, in place, as if it had streamed live."""
+        for at, pcm in self.gaps:
+            if len(pcm) < 32000:                 # under a second: nothing said
+                continue
+            try:
+                text = await asyncio.to_thread(meta_client.transcribe, pcm_to_wav(pcm), filename="gap.wav")
+            except Exception as exc:  # noqa: BLE001
+                log.warning("offline narration at %s could not be transcribed: %s", _mmss(at), exc)
+                continue
+            if text:
+                frame = max(0, sum(1 for t in self.frame_times if t <= at) - 1)
+                self.turns.append({"n": 0, "text": text, "at": at, "frame": frame, "offline": True})
+        self.turns.sort(key=lambda t: t["at"])
+
     async def build(self) -> None:
-        log.info("capture stop: %d keyframes, %d live utterances, %d bytes pcm, %d bytes blob",
-                 len(self.keyframes), len(self.turns), len(self.pcm), sum(map(len, self.audio_blobs)))
+        log.info("capture stop: %d keyframes, %d live utterances, %d bytes pcm, %d offline gaps, %d bytes blob",
+                 len(self.keyframes), len(self.turns), len(self.pcm), len(self.gaps),
+                 sum(map(len, self.audio_blobs)))
         if not self.keyframes:
+            self.state = "idle"
             await self.out.send({"type": "error", "message": "No camera frames reached the server. "
                                  "Keep recording for a few seconds with the camera on the work, then stop."})
             return
+        self.state = "building"
         # Let the last utterance finish arriving from the voice stream.
         if self.voice:
             await asyncio.sleep(1.2)
+        if self.gaps:
+            await self.status("Adding the narration recorded while offline…")
+            await self._transcribe_gaps()
 
         spoke = any(t["n"] is not None for t in self.turns)
         transcript = self._narration() if spoke else ""
@@ -867,12 +1189,27 @@ class CaptureSession:
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("Procedure generation failed")
-            await self.out.send({"type": "error", "message": str(exc)})
+            await self._finish_with({"type": "error", "message": str(exc)})
             return
+        save_reference_photos(proc, self.capture_id)
         pid = db.save_procedure(proc["title"], proc["steps"], machine=proc.get("machine"),
                                 transcript=transcript)
-        await self.out.send({"type": "procedure", "procedure_id": pid, "procedure": proc})
+        await self._finish_with({"type": "procedure", "procedure_id": pid, "procedure": proc})
 
     async def close(self) -> None:
         if self.voice:
             await self.voice.close()
+
+
+def save_reference_photos(proc: dict[str, Any], tag: str) -> None:
+    """Keep each step's keyframe from the expert's take as its reference
+    photo: what "show me" displays and what the judge compares against.
+    Removes the raw frames from `proc` so it can be sent as JSON."""
+    frames = proc.pop("_frames", None) or []
+    for step in proc.get("steps", []):
+        ki = step.get("keyframe_index")
+        if not frames or not isinstance(ki, int) or not (0 <= ki < len(frames)):
+            continue
+        name = f"ref_{tag}_s{step.get('index', 0):02d}.jpg"
+        (config.MEDIA_DIR / name).write_bytes(frames[ki])
+        step["ref_image"] = f"media/{name}"

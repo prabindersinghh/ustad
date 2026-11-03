@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, live, meta_client
+from . import config, db, improve, live, meta_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -114,6 +114,61 @@ def api_insights(pid: str) -> dict[str, Any]:
     return db.step_insights(pid)
 
 
+@app.get("/api/procedures/{pid}/improve")
+def api_improve_latest(pid: str) -> dict[str, Any]:
+    """The latest suggestions for this procedure and its version history."""
+    if not db.get_procedure(pid):
+        raise HTTPException(404, "No such procedure")
+    return {"proposal": db.latest_proposal(pid), "history": db.procedure_history(pid)}
+
+
+@app.post("/api/procedures/{pid}/improve")
+def api_improve(pid: str) -> dict[str, Any]:
+    """Self-improving procedures: Spark reads the runs and proposes edits."""
+    try:
+        return improve.propose(pid)
+    except KeyError:
+        raise HTTPException(404, "No such procedure") from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post("/api/procedures/{pid}/proposals/{prid}/apply")
+def api_apply(pid: str, prid: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Supervisor approval: apply the accepted suggestions as a new version."""
+    accept = payload.get("accept") or []
+    if not isinstance(accept, list) or not all(isinstance(i, int) for i in accept):
+        raise HTTPException(422, "accept must be a list of suggestion numbers")
+    try:
+        return improve.apply(pid, prid, accept)
+    except KeyError:
+        raise HTTPException(404, "No such suggestions") from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.get("/api/sessions/{sid}/pack")
+def api_pack(sid: str) -> dict[str, Any]:
+    """Everything the evidence pack shows for one job: the session, the
+    procedure as it was when the job ran, and every event with its photo."""
+    record = db.session_log(sid)
+    if not record["session"]:
+        raise HTTPException(404, "No such session")
+    proc = db.get_procedure(record["session"]["procedure_id"]) or {"title": "(deleted procedure)", "steps": []}
+    steps = proc.get("steps", [])
+    ran = record["session"].get("procedure_version")
+    if ran and proc.get("version") and int(ran) != int(proc["version"]):
+        hist = db.procedure_history_steps(proc["id"], int(ran))
+        if hist:
+            steps = hist[0]
+    return {
+        **record,
+        "procedure": {"id": proc.get("id"), "title": proc["title"], "machine": proc.get("machine"),
+                      "version": ran or proc.get("version") or 1, "steps": steps},
+        "models": {"reasoning": config.SPARK_MODEL, "perception": config.SAM_MODEL},
+    }
+
+
 _clientlog_gate = live._RateGate(30, 60.0)   # unauthenticated: bound it
 
 
@@ -143,6 +198,15 @@ def dashboard() -> FileResponse:
     path = WEB_DIR / "dashboard.html"
     if not path.is_file():
         raise HTTPException(404, "dashboard.html missing")
+    return FileResponse(path)
+
+
+@app.get("/evidence")
+def evidence() -> FileResponse:
+    """Printable evidence pack for one job: /evidence?s=<session id>."""
+    path = WEB_DIR / "evidence.html"
+    if not path.is_file():
+        raise HTTPException(404, "evidence.html missing")
     return FileResponse(path)
 
 
@@ -182,15 +246,18 @@ async def _pump(ws: WebSocket, session) -> None:
 async def ws_capture(ws: WebSocket) -> None:
     """Expert records once; narration streams live; we return a procedure.
 
-      -> {"type":"start","hint":"..."}  {"type":"frame","data":"<jpeg data url>"}
+      -> {"type":"start","hint":"..."}  {"type":"frame","data":"<jpeg data url>","at"?:s}
       -> binary PCM (narration)          {"type":"stop"}
+      -> {"type":"rejoin","capture_id":"..."} after a dropped connection, then
+         buffered {"type":"frame",...,"at":s} and {"type":"audio_gap","at":s,"data":"<b64 pcm>"}
+      <- {"type":"capture","capture_id":"..."}  {"type":"rejoined"|"rejoin_failed", ...}
       <- {"type":"heard","text":"...","final":bool}   live captions
       <- {"type":"draft","n":N,"text":"...","at":"0:07"}  a step forming
       <- {"type":"draft_title","n":N,"title":"..."}
-      <- {"type":"status"|"frame_ack"|"error"|"procedure", ...}
+      <- {"type":"status"|"frame_ack"|"error"|"procedure"|"pong", ...}
     """
     await ws.accept()
-    await _pump(ws, live.CaptureSession(ws))
+    await _pump(ws, live.CaptureSocket(ws))
     log.info("capture socket closed")
 
 
@@ -201,9 +268,11 @@ async def ws_guide(ws: WebSocket) -> None:
       -> {"type":"start","procedure_id":"..."} | {"type":"resume","session_id":"..."}
       -> {"type":"watch","data":"<jpeg>"}  the live view, about once a second
       -> binary PCM (voice commands)       {"type":"check"} {"type":"repeat"|"skip"|"abort"}
+      -> {"type":"listen"} (Ask button)    {"type":"ask","text":"..."}  {"type":"show"}  {"type":"ping"}
       <- {"type":"track","detections":[...]}   live grounding for the AR box
       <- {"type":"heard"|"checking"|"auto"|"hazard"|"pulse", ...}
-      <- {"type":"speak"|"verdict"|"session"|"complete"|"error", ...}
+      <- {"type":"thinking"|"answer"|"point"|"reference", ...}   Ask Ustad
+      <- {"type":"speak"|"verdict"|"session"|"complete"|"error"|"pong", ...}
     """
     await ws.accept()
     await _pump(ws, live.GuideSession(ws))

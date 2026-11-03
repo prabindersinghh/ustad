@@ -76,6 +76,17 @@ VOICE = os.getenv("VOICE", "1") != "0"
 JUDGE_EFFORT = os.getenv("JUDGE_EFFORT", "low")          # operator said "done": must be right
 WATCH_EFFORT = os.getenv("WATCH_EFFORT", "minimal")      # background look; two passes must agree
 JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "1600"))
+# Show the judge the expert's own keyframe for the step next to the worker's
+# view (one extra image per check; steps captured before this have none).
+JUDGE_REFERENCE = os.getenv("JUDGE_REFERENCE", "1") != "0"
+# Ask Ustad: questions answered by Spark from the procedure, the expert's
+# words and the live view. Coaching starts after this many failed checks.
+# Measured on real photos: minimal ~3.3 s, low ~5.8 s, both 3/3 right tool.
+# An answer can never mark a step done (check_now runs the normal judge).
+ASK_EFFORT = os.getenv("ASK_EFFORT", "minimal")
+COACH_AFTER_FAILS = int(os.getenv("COACH_AFTER_FAILS", "2"))
+# Self-improving procedures: one considered Spark call per request, offline.
+IMPROVE_EFFORT = os.getenv("IMPROVE_EFFORT", "medium")
 
 # --------------------------------------------------------------------------
 # Spend. Every call is metered at list price (dev.meta.ai/docs/pricing-rate-
