@@ -30,12 +30,14 @@ def cap(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "r.db")
     monkeypatch.setattr(config, "MEDIA_DIR", tmp_path)
     monkeypatch.setattr(config, "VOICE", False)
+    monkeypatch.setattr(config, "TAKES_DIR", tmp_path / "takes")
+    monkeypatch.setattr(config, "VALIDATE_PROCEDURE", False)
     db.init()
     live._TAKES.clear()
     live._take_gates.clear()
     built = {}
 
-    def fake_build(transcript, keyframes, *, hint=None, frame_times=None):
+    def fake_build(transcript, keyframes, *, hint=None, frame_times=None, **_):
         built.update(transcript=transcript, frames=len(keyframes), times=list(frame_times or []))
         return {"title": "Job", "machine": None, "_frames": list(keyframes),
                 "steps": [{"index": 0, "title": "A", "instruction": "Do A", "target_phrase": "valve",
@@ -154,6 +156,60 @@ def test_take_creation_is_rate_limited_per_client(cap):
     assert all(live._admit_take("burst") for _ in range(6))
     assert not live._admit_take("burst")
     assert live._admit_take("another")
+
+
+def test_a_long_take_is_written_in_parts_while_recording_then_merged(cap, monkeypatch):
+    client, built, db = cap
+    from backend import config
+    monkeypatch.setattr(config, "SEGMENT_S", 0.0)             # every frame closes a part, for the test
+    drafted, merged = [], {}
+
+    def draft(transcript, frames, times, *, k, previous, hint=None):
+        drafted.append((k, len(frames), list(previous)))
+        return {"title": "Job", "machine": None, "steps": [
+            {"index": 0, "title": f"Part {k}", "instruction": f"Do part {k}", "target_phrase": "valve",
+             "keyframe_index": 0}]}
+
+    def merge(drafts, n_frames, hint=None):
+        merged["frames"] = [s["frame"] for d in drafts for s in d["steps"]]
+        merged["n"] = n_frames
+        return procedures._normalise({"title": "Job", "steps": [
+            {"title": s["title"], "instruction": s["instruction"], "target_phrase": "valve",
+             "keyframe_index": s["frame"]} for d in drafts for s in d["steps"]]}, n_frames=n_frames)
+
+    monkeypatch.setattr(procedures, "draft_segment", draft)
+    monkeypatch.setattr(procedures, "merge_drafts", merge)
+    monkeypatch.setattr(procedures, "build_procedure",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("one big call is not used")))
+    from backend.main import app
+    with TestClient(app) as one_loop:
+        with one_loop.websocket_connect("/ws/capture") as ws:
+            ws.send_json({"type": "start"})
+            cid = _until(ws, "capture")["capture_id"]
+            for _ in range(3):
+                ws.send_json({"type": "frame", "data": FRAME})
+                _until(ws, "frame_ack")
+            folder = config.TAKES_DIR / cid
+            assert len(list(folder.glob("*.jpg"))) == 3            # frames on disk, not in memory
+            ws.send_json({"type": "stop"})
+            proc = _until(ws, "procedure")["procedure"]
+    assert [d[0] for d in drafted] == [1, 2, 3]                     # one part per frame here
+    assert drafted[2][2] == ["Part 1", "Part 2"]                    # later parts know the earlier steps
+    assert merged == {"frames": [0, 1, 2], "n": 3}                  # local keyframes mapped to the take
+    assert [s["title"] for s in proc["steps"]] == ["Part 1", "Part 2", "Part 3"]
+    assert all(s["ref_image"].startswith("media/ref_") for s in proc["steps"])
+    assert not folder.exists()                                      # frames freed once saved
+
+
+def test_frame_store_reads_back_what_it_wrote(tmp_path):
+    fs = live.FrameStore(tmp_path / "t")
+    for b in (b"a", b"b", b"c"):
+        fs.append(b)
+    assert len(fs) == 3 and fs[0] == b"a" and fs[-1] == b"c" and list(fs) == [b"a", b"b", b"c"]
+    with pytest.raises(IndexError):
+        fs[3]
+    fs.remove()
+    assert not (tmp_path / "t").exists()
 
 
 def test_rejoin_to_an_unknown_take_says_so(cap):

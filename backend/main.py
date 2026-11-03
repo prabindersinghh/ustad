@@ -37,6 +37,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init()
+    live.clear_take_files()        # frames of unfinished takes from a previous run
     log.info("Ustad up. Spark=%s SAM=%s ASR=%s",
              config.SPARK_MODEL, config.SAM_MODEL, config.ASR_MODEL)
     if not config.MODEL_API_KEY:

@@ -44,28 +44,47 @@ lands here in the same commit.
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
 | `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal). |
-| `tests/` | 115 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
+| `tests/` | 119 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
 
 1. Tap **Start recording**. `Mic.prime()` runs inside the tap (iOS rule),
    then a 3-2-1 countdown, then the socket opens and sends `start`.
-2. A frame is sent every 2 s (never a black one). PCM streams live to the
-   realtime ASR, giving live captions, and `draft` step cards appear as the
-   expert talks. A backup audio recording runs alongside.
+2. Every 2 s the phone checks the view and sends a frame only if it changed
+   (or 10 s passed). Start, marks, resume and stop always send one, and a
+   black frame is never sent. Frames are stored on disk in `FrameStore`
+   (`data/takes/<id>/`). PCM streams live to the realtime ASR, giving live
+   captions, and `draft` step cards appear as the expert talks. A backup
+   audio recording runs alongside. Raw PCM is kept server-side only until the
+   first live utterance (the fallback), capped at 20 min.
 3. **Pause** stops frames, audio and the clock. **Mark step**, or saying
    "next step", inserts a `[step marker]`.
-4. **Stop**: the backup recording is uploaded only if the live stream carried
-   under 3 s of audio, then `stop` is sent.
-5. `build()`: the narration comes from live utterances, else batch ASR of the
-   PCM or the backup blob. Up to 12 keyframes are selected. Spark writes the
-   procedure. `_normalise` validates it. The self-check runs: every
-   `target_phrase` and `watch_for` phrase is grounded by SAM on the step's own
-   keyframe. Misses go back to Spark once for a rewrite. Anything still
-   missing is marked `trackable: false`. The best box SAM found for the
-   target is kept as `ref_box`.
-6. `save_reference_photos`: each step's keyframe is written to
-   `data/media/ref_<capture>_sNN.jpg` and linked as `ref_image`.
+4. **Long takes, while recording:** about every `SEGMENT_S` (240 s), at the
+   end of an utterance, or at twice that with no speech, the take is cut into
+   a part. The part owns its frames by index and its narration by time.
+   `draft_segment` writes its steps in the background (at most 8 frames,
+   knowing the earlier parts' step titles). Recording limit: 2 h.
+5. **Stop**: the backup recording is uploaded only if the live stream carried
+   under 3 s of audio, then `stop` is sent. The voice relay is closed.
+   `build()` runs as its own task and reports its phase every 5 s
+   ("Writing the steps… 10 s").
+   - **Short take** (no part cut): narration from live utterances, else batch
+     ASR. Up to 12 keyframes; Spark writes at `WRITER_EFFORT` (low).
+   - **Long take:** the last part is cut and drafted, then the parts are
+     merged by one text-only call (`merge_drafts`). Each step's `frame` is an
+     index into the whole take.
+6. **Self-check** (`_validate_and_repair`): every `target_phrase` and
+   `watch_for` phrase is grounded by SAM on its step's keyframe. For the
+   misses only, one `minimal` call (`_suggest_phrases`) proposes 3
+   alternatives each; all are SAM-tested in parallel and the first hit wins.
+   Unfixed watch items are `trackable: false`. The best target box is kept as
+   `ref_box`.
+7. `save_reference_photos`: each step's keyframe is written to
+   `data/media/ref_<capture>_sNN.jpg` and linked as `ref_image`. The take's
+   frames on disk are then deleted.
+
+Measured on the user's real 11 s take: 87 s before, 17.2 s now (write 13.6 s
+plus check 3.6 s). A 3-part take: 9.2 s left at stop.
 
 **Offline.** The take lives in `_TAKES` by `capture_id`, not in the socket.
 When the socket drops, the phone keeps recording:
@@ -272,6 +291,9 @@ a cent.
 | `AUTO_ADVANCE` · `AUTO_CONFIDENCE` | 1 · 0.8 | Auto-advance on two confident passes. |
 | `GROUNDING_FRESH_S` | 2.5 | Reuse a grounding this recent for a check. |
 | `JUDGE_EFFORT` · `WATCH_EFFORT` · `JUDGE_MAX_OUTPUT_TOKENS` | low · minimal · 1600 | Reasoning effort and output cap. |
+| `WRITER_EFFORT` · `REPAIR_EFFORT` | low · minimal | Writing a procedure (or a part); renaming parts SAM missed. |
+| `SEGMENT_S` · `SEGMENT_KEYFRAMES` | 240 · 8 | Long takes: part length and frames per part. |
+| `TAKES_DIR` | data/takes | A take's frames on disk until its procedure is saved. |
 | `JUDGE_REFERENCE` | 1 | Show the judge the expert's photo of the step. |
 | `ASK_EFFORT` · `COACH_AFTER_FAILS` | minimal · 2 | Ask Ustad reasoning effort; fails before coaching. |
 | `IMPROVE_EFFORT` | medium | Self-improving procedures. |

@@ -343,8 +343,31 @@ function retire(ws) {
   if (ws.readyState <= 1) { try { ws.close(); } catch (_) {} }
 }
 
-/* The browser says the network is back: don't wait out the backoff. */
+/* The browser says the network is back, or the screen came back on: don't
+ * wait out the backoff. */
 window.addEventListener('online', () => { Capture.kick(); Guide.kick(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { Capture.kick(); Guide.kick(); }
+});
+
+/* A 32x24 grayscale thumbnail of the camera view, and how different two of
+ * them are (mean absolute difference, 0 to 255). Used to send a frame only
+ * when the view changed: a camera resting on the bench sends almost nothing. */
+function thumbGray(video) {
+  const t = thumbGray.c || (thumbGray.c = Object.assign(document.createElement('canvas'), { width: 32, height: 24 }));
+  const g = t.getContext('2d', { willReadFrequently: true });
+  g.drawImage(video, 0, 0, 32, 24);
+  const px = g.getImageData(0, 0, 32, 24).data;
+  const gray = new Uint8Array(32 * 24);
+  for (let i = 0; i < gray.length; i++) gray[i] = (px[i * 4] * 3 + px[i * 4 + 1] * 6 + px[i * 4 + 2]) / 10;
+  return gray;
+}
+function grayDiff(a, b) {
+  if (!a || !b) return 255;
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+  return s / a.length;
+}
 
 /* ------------------------------------------------------------ capture */
 
@@ -352,8 +375,7 @@ window.addEventListener('online', () => { Capture.kick(); Guide.kick(); });
  * where they are: a countdown before it starts, a job clock with a guide
  * length and a hard limit, a live mic level, pause and resume, and a "Mark
  * step" button (or saying "next step") to set step boundaries themselves. */
-const CAPTURE_GUIDE_S = [60, 300];   // "aim for 1 to 5 minutes"
-const CAPTURE_LIMIT_S = 600;         // 10 minutes, then it stops and builds
+const CAPTURE_LIMIT_S = 7200;        // 2 hours, then it stops and builds (long jobs are written in parts as they go)
 
 const Capture = {
   ws: null, timer: null, clock: null, recorder: null, chunks: [], recording: false,
@@ -377,7 +399,7 @@ const Capture = {
     $('cap-time').textContent = '0:00';
     $('cap-limit').style.width = '0%';
     $('cap-status').textContent =
-      'Aim for 1 to 5 minutes. Say each step out loud as you do it, or tap Mark step between steps.';
+      'Record the whole job, any length up to 2 hours. Say each step out loud as you do it, or tap Mark step between steps.';
     $('cap-btn').onclick = () => (this.recording ? this.stop() : this.start());
     $('cap-pause').onclick = () => (this.paused ? this.resume() : this.pause());
     $('cap-mark').onclick = () => this.mark();
@@ -431,7 +453,7 @@ const Capture = {
       Voice.say('One minute left.');
     }
     if (s >= CAPTURE_LIMIT_S && this.recording) {
-      $('cap-status').textContent = 'Ten minute limit reached. Building your procedure.';
+      $('cap-status').textContent = 'Two hour limit reached. Building your procedure.';
       this.stop();
     }
   },
@@ -499,7 +521,10 @@ const Capture = {
     ws.onclose = () => {
       if (ws !== this.ws) return;               // an old socket closing late
       Liveness.stop(ws);
-      if (first && !this.recording) {           // never got going
+      // Never got going: the server never gave this take an id. (Checking
+      // "not recording" here was the bug that froze the screen: after Stop
+      // the take is building, not recording, and must be rejoined.)
+      if (!this.captureId) {
         if (this.connecting) {
           this.connecting = false;
           $('cap-status').textContent = 'Could not reach the server. Check the laptop is running, then try again.';
@@ -518,9 +543,12 @@ const Capture = {
     };
   },
 
-  /* The network is back: reconnect now, unless a socket is already on its way. */
+  /* The network is back, or the phone woke up: reconnect now, unless a
+   * socket is already open or on its way. iOS freezes timers and may close
+   * the socket while the screen is off, without telling the page. */
   kick() {
-    if (this.offline && this.reconnectTimer && !(this.ws && this.ws.readyState <= 1)) this.connect(false);
+    const busy = this.recording || this.processing || this.stopQueued;
+    if (busy && this.captureId && !(this.ws && this.ws.readyState <= 1)) this.connect(false);
   },
 
   setOffline(on) {
@@ -615,7 +643,7 @@ const Capture = {
     $('cap-status').textContent = 'Recording. Say each step as you do it. Say "next step" to start a new one.';
 
     // First frame now, then sample on an interval. Even a short take has frames.
-    this.sendFrame();
+    this.sendFrame(true);
     this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
 
     // Narration streams live: captions and step cards appear as you talk.
@@ -670,7 +698,7 @@ const Capture = {
     this.paused = false;
     this.send({ type: 'resume' });
     if (this.recorder && this.recorder.state === 'paused') this.recorder.resume();
-    this.sendFrame();
+    this.sendFrame(true);
     this.timer = setInterval(() => this.sendFrame(), CAPTURE_FRAME_MS);
     this.setState('recording', 'recording');
     $('cap-pause').textContent = 'Pause';
@@ -680,7 +708,7 @@ const Capture = {
 
   mark() {
     if (!this.recording || this.paused) return;
-    this.sendFrame();                // the frame at the boundary is worth keeping
+    this.sendFrame(true);              // the frame at the boundary is worth keeping
     const msg = { type: 'mark', at: this.elapsed() };
     if (this.online()) this.send(msg);
     else { this.pendingFrames.push({ mark: true, at: msg.at }); this.addMarker({ n: ++this.steps, at: mmss(msg.at) }); }
@@ -690,9 +718,17 @@ const Capture = {
 
   send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); },
 
-  sendFrame() {
+  /* A keyframe every 2 s, but only when the view changed (or 10 s passed,
+   * or at a step mark and at the end). The expert's hands still for a
+   * minute should not cost 30 identical frames, on a 2 hour job above all. */
+  sendFrame(force) {
     if (this.paused) return;
-    const data = MediaSource_.grab($('cap-video'));
+    const video = $('cap-video');
+    if (!video.videoWidth) return;
+    const gray = thumbGray(video);
+    if (!force && grayDiff(gray, this.lastGray) < 4 && Date.now() - (this.lastFrameAt || 0) < 10000) return;
+    const data = MediaSource_.grab(video);
+    if (data) { this.lastGray = gray; this.lastFrameAt = Date.now(); }
     if (data && this.online()) {
       this.ws.send(JSON.stringify({ type: 'frame', data }));
     } else if (data) {
@@ -771,7 +807,7 @@ const Capture = {
     this.processing = true;
     clearInterval(this.timer);
     clearInterval(this.clock);
-    this.sendFrame();   // the end state of the job is the most useful frame
+    this.sendFrame(true);   // the end state of the job is the most useful frame
     this.setState('building', 'building');
     $('cap-btn').textContent = 'Building your procedure…';
     $('cap-btn').disabled = true;
@@ -997,18 +1033,8 @@ const Guide = {
     if (!this.ws || this.ws.readyState !== 1) return;
     const video = $('guide-video');
     if (!video.videoWidth) return;
-    const t = this.thumb || (this.thumb = Object.assign(document.createElement('canvas'), { width: 32, height: 24 }));
-    const tctx = t.getContext('2d', { willReadFrequently: true });
-    tctx.drawImage(video, 0, 0, 32, 24);
-    const px = tctx.getImageData(0, 0, 32, 24).data;
-    const gray = new Uint8Array(32 * 24);
-    for (let i = 0; i < gray.length; i++) gray[i] = (px[i * 4] * 3 + px[i * 4 + 1] * 6 + px[i * 4 + 2]) / 10;
-    let diff = 255;
-    if (this.lastGray) {
-      let s = 0;
-      for (let i = 0; i < gray.length; i++) s += Math.abs(gray[i] - this.lastGray[i]);
-      diff = s / gray.length;
-    }
+    const gray = thumbGray(video);
+    const diff = grayDiff(gray, this.lastGray);
     const stale = Date.now() - (this.lastSentAt || 0) > 8000;   // refresh now and then anyway
     if (diff < 7 && !stale) { this.send({ type: 'still' }); this.sent.stills++; return; }
     const data = MediaSource_.grab(video, WATCH_WIDTH, 0.62);

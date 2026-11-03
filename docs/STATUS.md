@@ -1,7 +1,7 @@
 # Status
 
-**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 115 passing
-**Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $1.85 of the $50 working cap
+**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 119 passing
+**Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $2.16 of the $50 working cap
 
 ## In one paragraph
 
@@ -30,6 +30,9 @@ approval makes a new version.
 
 | Capability | Evidence |
 |---|---|
+| Capture build is fast and survives a drop: 17.2 s for the user's real take (was 87 s); browser test delivered the procedure 15 s after a mid-build drop | Real models 2026-11-03 22:30; browser test |
+| Long recordings (up to 2 h): written in parts while recording, merged at stop | Real models: 3 parts, 9.2 s left at stop; test |
+| iPhone mic works (worklet path) | iPhone `diag` 2026-11-03 13:49 |
 | Capture builds a correct procedure from camera plus narration | Live API run and iPhone runs (e.g. 2026-11-02 23:33, 7 keyframes, 4 steps) |
 | Capture keeps each step's expert photo, SAM box and the expert's quoted words | Tests; real capture in the browser 2026-11-03 13:30 saved 4 photos with boxes |
 | Judge compares the live view with the expert's photo | Real photos: 4/4 right with or without the reference, no added latency (6.9 vs 6.8 s median) |
@@ -54,7 +57,6 @@ approval makes a new version.
 - **The new features on the user's iPhone.** All were tested in a desktop
   browser with a fake camera and with real models. Next iPhone run: Ask, Show
   me, and a drop (turn Wi-Fi off mid-job).
-- **The mic fix on the user's iPhone** (the `diag` line will say which path).
 - **Muse Glimmer on Modal.** Needs the user's Modal login.
 
 ## Known issues
@@ -64,7 +66,7 @@ approval makes a new version.
 | Public URL is a Cloudflare *quick* tunnel: random name, dies on restart | Link changes | Named tunnel or ngrok static domain (user to choose) |
 | An explicit "done" check took about 6.8 s median on 2026-11-03 (2.4 s measured on 11-02 with smaller frames) | Slower tap-to-verdict | Background auto-advance usually beats the tap. Re-measure; consider `minimal` for taps with a fresh grounding |
 | Ask answers take about 3.3 s (`minimal`) | A pause before the answer | "Thinking" shown on screen. Acceptable for now |
-| Server restart loses an in-progress capture take (held in memory) | Phone shows "server restarted, record again" | Persist takes to disk if it matters |
+| Server restart loses an in-progress capture take (state in memory; frames on disk are cleared at start) | Phone shows "server restarted, record again" | Persist takes to disk if it matters |
 | Procedures captured before today have no expert photos | Show me and reference judging fall back gracefully | Re-capture demo jobs |
 | Hand-near-hazard runs at about 1 fps with 2 to 3 s latency | Advisory only | Stated plainly; never marketed as a guard |
 

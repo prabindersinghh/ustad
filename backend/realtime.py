@@ -110,15 +110,22 @@ class VoiceRelay:
             sent = 0
             try:
                 while True:
-                    chunk = await self._queue.get()
+                    # Wait for audio or for the upstream to fail, whichever
+                    # comes first: an upstream error while no audio flows
+                    # (stop, pause) must surface, not sit in an orphaned task.
+                    getter = asyncio.ensure_future(self._queue.get())
+                    done, _ = await asyncio.wait({getter, reader}, return_when=asyncio.FIRST_COMPLETED)
+                    if getter not in done:
+                        getter.cancel()
+                        reader.result()   # upstream error -> reconnect
+                        return            # upstream closed: start a new session
+                    chunk = getter.result()
                     if chunk is None:
                         await ws.send(json.dumps({"type": "endStream"}))
                         await asyncio.wait_for(reader, timeout=5)
                         return
                     await ws.send(chunk)
                     sent += len(chunk)
-                    if reader.done():
-                        reader.result()   # surface upstream errors -> reconnect
             finally:
                 if not reader.done():
                     reader.cancel()

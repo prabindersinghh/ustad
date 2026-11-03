@@ -30,6 +30,7 @@ import base64
 import logging
 import struct
 import time
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any
 
@@ -884,9 +885,54 @@ def _mmss(seconds: float) -> str:
 TAKE_TTL_S = 20 * 60
 MAX_TAKES = 12                              # takes held in memory at once
 MAX_TAKES_PER_CLIENT = 4                    # per client address (a factory NAT shares one)
-MAX_KEYFRAMES = 400                         # per take
+MAX_KEYFRAMES = 4000                        # per take: 2 h at one every 2 s (frames live on disk)
+PCM_CAP = 16000 * 2 * 1200                  # fallback narration audio kept per take: 20 min
 MAX_GAP_BYTES = 16000 * 2 * 600             # 10 min of offline narration per take
 _TAKES: dict[str, "CaptureSession"] = {}
+
+
+def _drop_take(cid: str) -> None:
+    """Forget a take and delete its frames from disk."""
+    take = _TAKES.pop(cid, None)
+    if take is not None:
+        take.keyframes.remove()
+
+
+def clear_take_files() -> None:
+    """At startup: frames of takes from a previous run can't be resumed."""
+    import shutil
+    shutil.rmtree(config.TAKES_DIR, ignore_errors=True)
+
+
+class FrameStore:
+    """A take's keyframes on disk (data/takes/<id>/NNNNN.jpg), indexable like
+    a list of JPEG bytes. A long job is thousands of frames: they must not sit
+    in memory, and only the few the writer needs are ever read back."""
+
+    def __init__(self, folder: Path) -> None:
+        self.dir, self.n = folder, 0
+
+    def append(self, jpeg: bytes) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        (self.dir / f"{self.n:05d}.jpg").write_bytes(jpeg)
+        self.n += 1
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, i: int) -> bytes:
+        if i < 0:
+            i += self.n
+        if not 0 <= i < self.n:
+            raise IndexError(i)
+        return (self.dir / f"{i:05d}.jpg").read_bytes()
+
+    def __iter__(self):
+        return (self[i] for i in range(self.n))
+
+    def remove(self) -> None:
+        import shutil
+        shutil.rmtree(self.dir, ignore_errors=True)
 
 
 TAKE_TTL_EMPTY_S = 120                      # a detached take with almost nothing in it
@@ -925,11 +971,11 @@ def _admit_take(owner: str) -> bool:
         # (a few seconds, or junk holding a slot) is freed after 2 minutes.
         ttl = TAKE_TTL_S if len(take.keyframes) >= 5 else TAKE_TTL_EMPTY_S
         if take.detached_at and now - take.detached_at > ttl:
-            _TAKES.pop(cid, None)
+            _drop_take(cid)
     mine = sorted((t.detached_at, cid) for cid, t in _TAKES.items() if t.owner == owner and t.detached_at)
     while mine and (len(_TAKES) >= MAX_TAKES
                     or sum(1 for t in _TAKES.values() if t.owner == owner) >= MAX_TAKES_PER_CLIENT):
-        _TAKES.pop(mine.pop(0)[1], None)
+        _drop_take(mine.pop(0)[1])
     return (len(_TAKES) < MAX_TAKES
             and sum(1 for t in _TAKES.values() if t.owner == owner) < MAX_TAKES_PER_CLIENT)
 
@@ -993,8 +1039,14 @@ class CaptureSession:
         self.owner = "?"                      # client address that started it
 
     def reset(self) -> None:
-        self.keyframes: list[bytes] = []
+        if getattr(self, "keyframes", None) is not None:
+            self.keyframes.remove()
+        self.keyframes = FrameStore(config.TAKES_DIR / self.capture_id)
         self.frame_times: list[float] = []
+        self.segments: list[dict[str, Any]] = []    # parts of a long take, drafted while recording
+        self.cut_at = 0.0                           # narration before this time is in a part
+        self.cut_frame = 0                          # frames before this index are in a part
+        self.phase = ""
         self.turns: list[dict[str, Any]] = []
         self.pcm = bytearray()
         self.gaps: list[tuple[float, bytes]] = []   # (at, pcm) recorded while offline
@@ -1035,7 +1087,7 @@ class CaptureSession:
         if self.state in ("recording", "building"):
             log.info("capture %s: socket dropped while %s; keeping the take", self.capture_id, self.state)
         elif self.state == "done" or not self.keyframes:
-            _TAKES.pop(self.capture_id, None)
+            _drop_take(self.capture_id)
 
     def elapsed(self) -> float:
         """Recording time, excluding pauses: what the job clock should show."""
@@ -1088,7 +1140,7 @@ class CaptureSession:
             # Frames buffered on the phone while offline carry the job-clock
             # time they were taken at; live ones are stamped on arrival.
             if len(self.keyframes) >= MAX_KEYFRAMES:
-                return True                       # 10 min at one every 2 s, plus offline slack
+                return True
             at = self.elapsed()
             if isinstance(msg.get("at"), (int, float)):
                 lo = self.frame_times[-1] if self.frame_times else 0.0
@@ -1096,6 +1148,7 @@ class CaptureSession:
             self.keyframes.append(decode_frame(msg["data"]))
             self.frame_times.append(at)
             await self.out.send({"type": "frame_ack", "count": len(self.keyframes)})
+            self._maybe_cut(quiet=True)
         elif kind == "audio_gap":                 # narration recorded while offline
             data = msg.get("data") or ""
             room = MAX_GAP_BYTES - sum(len(p) for _, p in self.gaps)
@@ -1126,7 +1179,10 @@ class CaptureSession:
     async def on_audio(self, pcm: bytes) -> None:
         if not self.recording or self.paused_at is not None:
             return
-        self.pcm.extend(pcm)
+        # Raw audio is only the fallback for when live transcription fails:
+        # kept until the first live utterance, and never more than 20 min.
+        if not self.turns_spoken and len(self.pcm) < PCM_CAP:
+            self.pcm.extend(pcm)
         if not config.VOICE:
             return
         if self.voice is None:
@@ -1151,8 +1207,71 @@ class CaptureSession:
         n = sum(1 for t in self.turns if t["n"] is not None) + 1
         turn = {"n": n, "text": text, "at": at, "frame": max(0, len(self.keyframes) - 1)}
         self.turns.append(turn)
+        if self.pcm:
+            self.pcm = bytearray()                # live transcription works: no fallback needed
         await self.out.send({"type": "draft", "n": turn["n"], "text": text, "at": _mmss(at)})
         asyncio.create_task(self._title(turn))
+        self._maybe_cut()
+
+    @property
+    def turns_spoken(self) -> bool:
+        return any(t["n"] is not None for t in self.turns)
+
+    # ---- long takes: written part by part while recording -----------------
+    def _maybe_cut(self, *, quiet: bool = False) -> None:
+        """Cut a part once it is SEGMENT_S long, at the end of an utterance
+        (or at twice that with no speech), and draft it in the background."""
+        if self.state != "recording" or self.paused_at is not None:
+            return
+        if self.elapsed() - self.cut_at >= config.SEGMENT_S * (2 if quiet else 1):
+            self._cut(self.elapsed())
+
+    def _cut(self, end: float) -> None:
+        """Close a part: the frames received so far (by index, so none is
+        lost at the edge) and the narration spoken before `end`."""
+        seg = {"k": len(self.segments) + 1, "start": self.cut_at, "end": end, "draft": None,
+               "f0": self.cut_frame, "f1": len(self.keyframes)}
+        self.cut_at, self.cut_frame = end, len(self.keyframes)
+        self.segments.append(seg)
+        seg["task"] = asyncio.create_task(self._draft(seg), name=f"capture-part-{seg['k']}")
+
+    async def _draft(self, seg: dict[str, Any]) -> None:
+        ids = list(range(seg["f0"], len(self.keyframes) if seg["end"] == float("inf") else seg["f1"]))
+        if not ids:
+            return
+        ids = [ids[i] for i in procedures.select_keyframes(len(ids), config.SEGMENT_KEYFRAMES)]
+        frames = await asyncio.to_thread(lambda: [self.keyframes[i] for i in ids])
+        times = [self.frame_times[i] for i in ids]
+        transcript = "\n".join(f"[{_mmss(t['at'])}] {t['text']}" for t in self.turns
+                               if seg["start"] <= t["at"] < seg["end"])
+        previous = [st["title"] for s in self.segments if s["k"] < seg["k"] and s.get("draft")
+                    for st in s["draft"]["steps"]]
+        t0 = time.monotonic()
+        for attempt in (1, 2):
+            try:
+                draft = await asyncio.to_thread(procedures.draft_segment, transcript, frames, times,
+                                                k=seg["k"], previous=previous, hint=self.hint)
+                break
+            except Exception as exc:  # noqa: BLE001
+                log.warning("capture %s: part %d draft failed (try %d): %s", self.capture_id, seg["k"], attempt, exc)
+        else:
+            return
+        for st in draft["steps"]:                 # local keyframe index -> frame in the whole take
+            ki = st.get("keyframe_index")
+            st["keyframe_index"] = st["frame"] = ids[ki if isinstance(ki, int) and 0 <= ki < len(ids) else 0]
+        seg["draft"] = draft
+        log.info("capture %s: part %d (%s to %s) drafted, %d steps in %d ms", self.capture_id, seg["k"],
+                 _mmss(seg["start"]), _mmss(min(seg["end"], self.elapsed())), len(draft["steps"]),
+                 (time.monotonic() - t0) * 1000)
+
+    async def _ticker(self) -> None:
+        """While building, say what is happening every few seconds: the
+        screen never looks frozen, and the socket never goes quiet."""
+        t0 = time.monotonic()
+        while True:
+            await asyncio.sleep(5)
+            if self.phase:
+                await self.status(f"{self.phase}… {int(time.monotonic() - t0)} s")
 
     async def _title(self, turn: dict[str, Any]) -> None:
         """A short step title for the live card. Text-only, cheap, best effort."""
@@ -1180,6 +1299,8 @@ class CaptureSession:
         (the socket may have dropped while the procedure was being written)."""
         self.result = msg
         self.state = "done"
+        self.phase = ""
+        self.keyframes.remove()                   # reference photos are saved; frames no longer needed
         await self.out.send(msg)
 
     async def _transcribe_gaps(self) -> None:
@@ -1208,14 +1329,33 @@ class CaptureSession:
                                  "Keep recording for a few seconds with the camera on the work, then stop."})
             return
         self.state = "building"
-        # Let the last utterance finish arriving from the voice stream.
+        # Let the last utterance finish arriving from the voice stream, then
+        # close it: an idle upstream session only errors out.
         if self.voice:
             await asyncio.sleep(1.2)
-        if self.gaps:
-            await self.status("Adding the narration recorded while offline…")
-            await self._transcribe_gaps()
+            voice, self.voice = self.voice, None
+            await voice.close()
+        ticker = asyncio.create_task(self._ticker())
+        t0 = time.monotonic()
+        try:
+            await self._build(t0)
+        finally:
+            ticker.cancel()
 
-        spoke = any(t["n"] is not None for t in self.turns)
+    async def _build(self, t0: float) -> None:
+        if self.gaps:
+            self.phase = "Adding the narration recorded while offline"
+            await self.status(self.phase + "…")
+            await self._transcribe_gaps()
+            for seg in self.segments:             # parts drafted without it: draft again
+                if any(seg["start"] <= at < seg["end"] for at, _ in self.gaps):
+                    await seg["task"]
+                    seg["task"] = asyncio.create_task(self._draft(seg))
+        if self.segments:
+            await self._build_long(t0)
+            return
+
+        spoke = self.turns_spoken
         transcript = self._narration() if spoke else ""
         if not transcript:
             await self.status(f"Captured {len(self.keyframes)} keyframes. Transcribing…")
@@ -1236,19 +1376,63 @@ class CaptureSession:
         if markers and not spoke:
             transcript = (transcript + "\n" if transcript else "") + "\n".join(
                 f"[{_mmss(t['at'])}] [step marker]" for t in markers)
-        await self.status("Writing the procedure…")
+        self.phase = "Writing the steps"
+        await self.status(self.phase + "…")
         try:
             proc = await asyncio.to_thread(
                 procedures.build_procedure, transcript, self.keyframes,
-                hint=self.hint, frame_times=self.frame_times,
+                hint=self.hint, frame_times=self.frame_times, validate=False,
             )
         except Exception as exc:  # noqa: BLE001
             log.exception("Procedure generation failed")
             await self._finish_with({"type": "error", "message": str(exc)})
             return
-        save_reference_photos(proc, self.capture_id)
+        await self._check_and_save(proc, transcript, t0, time.monotonic())
+
+    async def _build_long(self, t0: float) -> None:
+        """A take long enough to have been cut into parts: most parts were
+        drafted while recording, so only the last part and a text-only
+        merge are left to do now."""
+        self._cut(float("inf"))
+        self.phase = f"Writing the last part ({len(self.segments)} parts)"
+        await self.status(self.phase + "…")
+        for seg in self.segments:
+            await seg["task"]
+        drafts = [s["draft"] for s in self.segments if s.get("draft")]
+        if not drafts:
+            await self._finish_with({"type": "error", "message": "Could not write this recording. Try again."})
+            return
+        if len(drafts) == 1:
+            proc = drafts[0]
+        else:
+            self.phase = f"Putting {len(drafts)} parts together"
+            await self.status(self.phase + "…")
+            try:
+                proc = await asyncio.to_thread(procedures.merge_drafts, drafts, len(self.keyframes), hint=self.hint)
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Merging parts failed")
+                await self._finish_with({"type": "error", "message": str(exc)})
+                return
+        proc["_frames"] = self.keyframes
+        await self._check_and_save(proc, self._narration(), t0, time.monotonic())
+
+    async def _check_and_save(self, proc: dict[str, Any], transcript: str, t0: float, t1: float) -> None:
+        """The self-check on the expert's own frames, then save."""
+        frames = proc.get("_frames") or []
+        if config.VALIDATE_PROCEDURE and len(frames):
+            self.phase = "Checking every part name on your footage"
+            await self.status(self.phase + "…")
+            try:
+                proc = await asyncio.to_thread(procedures._validate_and_repair, proc, frames)
+            except Exception:  # noqa: BLE001
+                log.exception("Procedure self-check failed; saving it unchecked")
+        self.phase = ""
+        await asyncio.to_thread(save_reference_photos, proc, self.capture_id)
         pid = db.save_procedure(proc["title"], proc["steps"], machine=proc.get("machine"),
                                 transcript=transcript)
+        log.info("capture %s: built %r, %d steps, %d parts, write %.1f s, check %.1f s",
+                 self.capture_id, proc["title"], len(proc["steps"]), len(self.segments),
+                 t1 - t0, time.monotonic() - t1)
         await self._finish_with({"type": "procedure", "procedure_id": pid, "procedure": proc})
 
     async def close(self) -> None:

@@ -102,20 +102,49 @@ Rules:
     narration.
 """
 
-# A regeneration pass is appended to SYSTEM when some target phrases failed to
-# ground, naming the offenders so the model can make them concrete.
-REPAIR_SUFFIX = """\
+# Phrases SAM couldn't find are repaired with ONE small call that proposes
+# alternatives for just those phrases, each tested by SAM in parallel. It
+# replaced a full regeneration with every image again, which took 60 s and
+# doubled the tokens on a real 11 s take.
+REPAIR_SYSTEM = """\
+A segmentation model could not find these part names in the image each was
+meant for. For each one, propose 3 alternative names for the SAME object, as
+it plainly looks in its image: colour, shape, material, position, any words
+printed on it. Each is a noun phrase of 1 to 4 words: no verbs, no articles,
+no "in hand", no "on the left of".
 
-REVISION REQUIRED. A segmentation model could NOT locate these target_phrase
-values in the keyframes you chose, which means the guide loop can never verify
-them:
+Return JSON: {"fixes": [{"id": <id>, "candidates": ["...", "...", "..."]}]}
+"""
 
-{failures}
+# Long recordings are written part by part while the expert is still
+# recording (see live.CaptureSession), then merged. A part sees only its own
+# few minutes of narration and frames, so cost grows with the length of the
+# job instead of exploding in one giant call, and at stop only the last part
+# and a text-only merge remain.
+SEGMENT_NOTE = """
 
-Regenerate the FULL procedure with the SAME steps and meaning, but rewrite each
-failed target_phrase to name a more concrete, visually distinct object that is
-actually present in the frames (and fix its keyframe_index if it was wrong).
-Keep the phrases that were not listed as problems.
+THIS IS PART {k} OF A LONGER RECORDING ({start} to {end}). Write only the
+steps that happen in this part, in order: 1 to 8 steps (this replaces the
+step count rule above). Steps already written for earlier parts:
+{previous}
+Do not repeat those. If a step started in the previous part and finishes
+here, write it once, here, in full. "title" is the whole job as you
+understand it so far.
+"""
+
+MERGE_SYSTEM = """\
+You merge the draft steps of one long expert recording, written part by part,
+into one clean procedure for a new worker. The drafts are in time order.
+
+  * Merge duplicates and any step split across a part boundary into one.
+  * Keep every distinct action, in order. Never invent a step.
+  * Keep lockout, isolation and other safety steps as their own steps.
+  * Keep each step's fields. For a merged step keep the clearest wording and
+    the "frame" of the draft that best shows its target.
+  * "frame" must be one of the frame numbers given in the drafts.
+
+Return JSON: {"title": "...", "machine": "... or null", "steps": [ {the same
+fields as the drafts, including "frame"} ]}
 """
 
 
@@ -150,7 +179,7 @@ def build_procedure(
 
     if validate and frames:
         try:
-            proc = _validate_and_repair(proc, frames, transcript, hint=hint, times=times)
+            proc = _validate_and_repair(proc, frames)
         except Exception:  # noqa: BLE001 - validation is best-effort, never fatal
             log.exception("Procedure self-check failed; returning unvalidated procedure")
     # keyframe_index points into the frames the writer saw; the caller keeps
@@ -184,6 +213,7 @@ def _generate(
     hint: str | None,
     extra_system: str = "",
     times: list[float] | None = None,
+    effort: str | None = None,
 ) -> dict[str, Any]:
     when = (
         "\nKeyframe capture times: "
@@ -203,34 +233,102 @@ def _generate(
     ]
     content.extend(meta_client.as_image_part(f) for f in frames)
 
-    data = meta_client.reason_json(SYSTEM + extra_system, content)
+    data = meta_client.reason_json(SYSTEM + extra_system, content, effort=effort or config.WRITER_EFFORT)
     return _normalise(data, n_frames=len(frames))
+
+
+def draft_segment(
+    transcript: str,
+    frames: list[bytes],
+    times: list[float],
+    *,
+    k: int,
+    previous: list[str],
+    hint: str | None = None,
+) -> dict[str, Any]:
+    """Write the steps of one part of a long recording. keyframe_index in the
+    result is local to `frames` (the caller maps it back)."""
+    note = SEGMENT_NOTE.format(
+        k=k, start=_mmss(times[0]) if times else "?", end=_mmss(times[-1]) if times else "?",
+        previous="\n".join(f"  - {t}" for t in previous[-20:]) or "  (none: this is the first part)")
+    return _generate(transcript, frames, hint=hint, times=times, extra_system=note)
+
+
+def merge_drafts(drafts: list[dict[str, Any]], n_frames: int, *, hint: str | None = None) -> dict[str, Any]:
+    """One text-only call: the parts' draft steps become one procedure.
+    Each draft step carries "frame", an index into the whole take."""
+    import json
+
+    keep = ("title", "instruction", "target_phrase", "success_criteria", "check", "reading", "duration_s",
+            "watch_for", "common_mistake", "hazard", "expert_said")
+    parts = [{"part": i + 1, "steps": [{**{f: s.get(f) for f in keep}, "frame": s["frame"]}
+                                       for s in d.get("steps", [])]} for i, d in enumerate(drafts)]
+    text = ((f"Context from the supervisor: {hint}\n\n" if hint else "")
+            + "Draft titles of the job: " + "; ".join(d.get("title", "") for d in drafts)
+            + "\n\nDrafts, in time order:\n" + json.dumps(parts, ensure_ascii=False))
+    data = meta_client.reason_json(MERGE_SYSTEM, [{"type": "input_text", "text": text}],
+                                   effort=config.WRITER_EFFORT)
+    if isinstance(data, dict):
+        for s in data.get("steps") or []:
+            if isinstance(s, dict):
+                s["keyframe_index"] = s.get("frame")
+    return _normalise(data, n_frames=n_frames)
 
 
 # --------------------------------------------------------------------------
 # Grounding self-check
 # --------------------------------------------------------------------------
 
+def _frame_for(step: dict[str, Any], frames: Any) -> bytes:
+    ki = step.get("keyframe_index")
+    if not isinstance(ki, int) or not (0 <= ki < len(frames)):
+        ki = min(step.get("index", 0), len(frames) - 1)
+    return frames[ki]
+
+
+def _suggest_phrases(items: list[dict[str, Any]], frames: Any) -> dict[int, list[str]]:
+    """One small Spark call: 3 alternative names for each phrase SAM missed,
+    looking at each one's own keyframe. {item id: [candidates]}."""
+    content: list[dict[str, Any]] = []
+    lines = []
+    for it in items:
+        step = it["step"]
+        what = "target part" if it["kind"] == "target" else f"{it['role']} to watch"
+        lines.append(f"id {it['id']}: step {step.get('index', 0) + 1} \"{step.get('title', '')}\" "
+                     f"({step.get('instruction', '')}). {what}: \"{it['old']}\". Its image is image {it['id']}.")
+    content.append({"type": "input_text", "text": "\n".join(lines)})
+    for it in items:
+        content.append({"type": "input_text", "text": f"Image {it['id']}:"})
+        content.append(meta_client.as_image_part(_frame_for(it["step"], frames)))
+    data = meta_client.reason_json(REPAIR_SYSTEM, content, effort=config.REPAIR_EFFORT)
+    out: dict[int, list[str]] = {}
+    for fix in (data or {}).get("fixes", []) if isinstance(data, dict) else []:
+        try:
+            cands = [" ".join(str(c).split())[:60] for c in fix.get("candidates", []) if str(c).strip()]
+            out[int(fix["id"])] = cands[:3]
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
 def _validate_and_repair(
     proc: dict[str, Any],
-    frames: list[bytes],
-    transcript: str,
+    frames: Any,
     *,
-    hint: str | None,
     segment_fn: Callable[[str, bytes], list[Any]] | None = None,
-    generate_fn: Callable[..., dict[str, Any]] | None = None,
-    times: list[float] | None = None,
+    repair_fn: Callable[[list[dict[str, Any]], Any], dict[int, list[str]]] | None = None,
 ) -> dict[str, Any]:
-    """Ground every target_phrase; regenerate the failures once.
+    """Ground every target, hazard and tool phrase on its own keyframe; for
+    the ones SAM can't find, ask once for alternatives and keep the first
+    alternative SAM finds. `frames` is any indexable sequence of JPEG bytes.
 
-    `segment_fn` and `generate_fn` are injectable so this is unit-testable
+    `segment_fn` and `repair_fn` are injectable so this is unit-testable
     without touching the network.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     segment_fn = segment_fn or meta_client.segment
-    generate_fn = generate_fn or (
-        lambda: _generate(transcript, frames, hint=hint, times=times,
-                          extra_system=REPAIR_SUFFIX.format(failures=failures_block))
-    )
+    repair_fn = repair_fn or _suggest_phrases
 
     failures = _check_grounding(proc["steps"], frames, segment_fn)
     # Hazards and tools are checked the same way: a hazard phrase SAM can't
@@ -243,31 +341,43 @@ def _validate_and_repair(
         "watch_missing_before": [w["phrase"] for _, w in watch_missing],
         "repaired": False,
     }
-
-    if failures or watch_missing:
-        failures_block = "\n".join(
-            [f"  - step {f['index'] + 1} ({f['title']!r}): "
-             f"target_phrase {f['target_phrase']!r} not found" for f in failures]
-            + [f"  - step {s['index'] + 1} ({s['title']!r}): watch_for {w['role']} {w['phrase']!r} "
-               f"not found; name it the way it looks in the frames, or drop it if it isn't visible"
-               for s, w in watch_missing]
-        )
-        log.info("%d target and %d watch phrase(s) failed grounding; regenerating",
+    items = ([{"id": i, "kind": "target", "step": s, "old": s.get("target_phrase") or ""}
+              for i, s in enumerate(failures)]
+             + [{"id": len(failures) + j, "kind": "watch", "step": s, "item": w, "old": w["phrase"],
+                 "role": w["role"]} for j, (s, w) in enumerate(watch_missing)])
+    if items:
+        log.info("%d target and %d watch phrase(s) failed grounding; asking for alternatives",
                  len(failures), len(watch_missing))
         try:
-            repaired = generate_fn()
-            still = _check_grounding(repaired["steps"], frames, segment_fn)
-            still_watch = _check_watch(repaired["steps"], frames, segment_fn)
-            report["repaired"] = True
-            report["failed_after"] = [f["target_phrase"] for f in still]
-            # Only accept the repair if it did not make things worse.
-            if len(still) + len(still_watch) <= len(failures) + len(watch_missing):
-                proc = repaired
-            else:
-                report["failed_after"] = report["failed_before"]
+            cands = repair_fn(items, frames)
         except Exception:  # noqa: BLE001
-            log.exception("Repair regeneration failed; keeping original procedure")
-            report["failed_after"] = report["failed_before"]
+            log.exception("Phrase repair failed; keeping the original phrases")
+            cands = {}
+        jobs = [(it, c) for it in items for c in cands.get(it["id"], [])]
+
+        def test(job):
+            try:
+                return segment_fn(job[1], _frame_for(job[0]["step"], frames))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("SAM check of %r failed: %s", job[1], exc)
+                return []
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(jobs)))) as pool:
+            hits = list(pool.map(test, jobs))
+        fixed: set[int] = set()
+        for (it, cand), dets in zip(jobs, hits):
+            if it["id"] in fixed or not dets:
+                continue                         # candidates are tried in the order given
+            fixed.add(it["id"])
+            if it["kind"] == "target":
+                it["step"]["target_phrase"] = cand
+                best = max(dets, key=lambda d: getattr(d, "confidence", 0) or 0)
+                if hasattr(best, "to_dict"):
+                    it["step"]["ref_box"] = best.to_dict()
+            else:
+                it["item"]["phrase"], it["item"]["trackable"] = cand, True
+        report["repaired"] = bool(fixed)
+        report["failed_after"] = [it["step"].get("target_phrase") for it in items
+                                  if it["kind"] == "target" and it["id"] not in fixed]
     else:
         report["failed_after"] = []
 

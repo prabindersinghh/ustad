@@ -49,8 +49,20 @@ MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Cost control: how often we sample frames from the live stream.
 CAPTURE_FRAME_INTERVAL_S = 2.0
-# How many keyframes we hand to Spark when generating a procedure.
+# How many keyframes we hand to Spark when generating a procedure (or one
+# part of a long recording).
 MAX_KEYFRAMES_FOR_PROCEDURE = 12
+# Writing a procedure: measured on a real take, default effort 19.9 s, low
+# 10.2 s with the same steps, minimal 11.2 s (output-bound). Low it is.
+WRITER_EFFORT = os.getenv("WRITER_EFFORT", "low")
+# Renaming parts SAM couldn't find: minimal 2.5 s vs low 6 s, same top pick.
+REPAIR_EFFORT = os.getenv("REPAIR_EFFORT", "minimal")
+# Long recordings are written in parts while recording: a part is cut at an
+# utterance boundary once it is this long (or twice this, with no speech).
+SEGMENT_S = float(os.getenv("SEGMENT_S", "240"))
+SEGMENT_KEYFRAMES = 8
+# A take's frames live on disk, not in memory: one long job can be hours.
+TAKES_DIR = ROOT / "data" / "takes"
 
 # --------------------------------------------------------------------------
 # Live guide mode. While a step is active the phone streams a low-res view and

@@ -64,58 +64,51 @@ def test_bad_keyframe_index_falls_back_in_range():
     assert seen["frame"] in frames
 
 
-def test_validate_and_repair_accepts_a_successful_repair():
+def test_repair_keeps_the_first_alternative_sam_finds():
     frames = [b"f0", b"f1"]
     proc = {"title": "T", "machine": None,
             "steps": [_step(0, "vague thing", 0), _step(1, "red valve", 1)]}
-
-    repaired = {"title": "T", "machine": None,
-                "steps": [_step(0, "left pressure gauge", 0), _step(1, "red valve", 1)]}
-
     good = {"red valve", "left pressure gauge"}
+    asked = {}
 
-    def fake_segment(phrase, frame):
-        return ["det"] if phrase in good else []
+    def repair(items, fr):
+        asked["items"] = [(i["id"], i["kind"], i["old"]) for i in items]
+        return {0: ["still vague", "left pressure gauge", "gauge"]}
 
     out = procedures._validate_and_repair(
-        proc, frames, "transcript", hint=None,
-        segment_fn=fake_segment, generate_fn=lambda: repaired,
-    )
-    assert out["_validation"]["repaired"] is True
-    assert out["_validation"]["failed_before"] == ["vague thing"]
-    assert out["_validation"]["failed_after"] == []
+        proc, frames, segment_fn=lambda p, f: ["det"] if p in good else [], repair_fn=repair)
+    assert asked["items"] == [(0, "target", "vague thing")]          # only the failure is sent
     assert out["steps"][0]["target_phrase"] == "left pressure gauge"
+    assert out["steps"][1]["target_phrase"] == "red valve"             # untouched
+    v = out["_validation"]
+    assert v["repaired"] is True and v["failed_before"] == ["vague thing"] and v["failed_after"] == []
 
 
-def test_validate_and_repair_rejects_a_worse_repair():
-    frames = [b"f0"]
+def test_repair_with_no_working_alternative_keeps_the_phrase():
     proc = {"title": "T", "machine": None, "steps": [_step(0, "gauge", 0)]}
-    # The "repair" introduces two failures where there was one -> reject it.
-    worse = {"title": "T", "machine": None,
-             "steps": [_step(0, "nope", 0), _step(1, "also nope", 0)]}
-
     out = procedures._validate_and_repair(
-        proc, frames, "t", hint=None,
-        segment_fn=lambda p, f: [],       # nothing grounds
-        generate_fn=lambda: worse,
-    )
-    # Original kept because repair did not reduce the failure count.
-    assert out["steps"] == proc["steps"]
+        proc, [b"f0"], segment_fn=lambda p, f: [], repair_fn=lambda items, fr: {0: ["dial", "meter"]})
+    assert out["steps"][0]["target_phrase"] == "gauge"
+    assert out["_validation"]["repaired"] is False and out["_validation"]["failed_after"] == ["gauge"]
 
 
-def test_no_failures_means_no_regeneration():
-    frames = [b"f0"]
+def test_repair_failure_is_not_fatal():
+    def boom(items, fr):
+        raise RuntimeError("Spark down")
+    proc = {"title": "T", "machine": None, "steps": [_step(0, "gauge", 0)]}
+    out = procedures._validate_and_repair(proc, [b"f0"], segment_fn=lambda p, f: [], repair_fn=boom)
+    assert out["steps"][0]["target_phrase"] == "gauge" and out["_validation"]["failed_after"] == ["gauge"]
+
+
+def test_no_failures_means_no_repair_call():
     proc = {"title": "T", "machine": None, "steps": [_step(0, "red valve", 0)]}
 
-    def must_not_be_called():
-        raise AssertionError("generate_fn should not run when nothing failed")
+    def must_not_be_called(items, fr):
+        raise AssertionError("repair should not run when nothing failed")
 
     out = procedures._validate_and_repair(
-        proc, frames, "t", hint=None,
-        segment_fn=lambda p, f: ["det"], generate_fn=must_not_be_called,
-    )
-    assert out["_validation"]["repaired"] is False
-    assert out["_validation"]["failed_after"] == []
+        proc, [b"f0"], segment_fn=lambda p, f: ["det"], repair_fn=must_not_be_called)
+    assert out["_validation"]["repaired"] is False and out["_validation"]["failed_after"] == []
 
 
 def _watched(i, target, hazard):
@@ -124,16 +117,12 @@ def _watched(i, target, hazard):
     return s
 
 
-def test_unfound_hazard_phrase_triggers_a_repair():
-    frames = [b"f0"]
+def test_unfound_hazard_phrase_is_repaired():
     proc = {"title": "T", "machine": None, "steps": [_watched(0, "red stop button", "circular saw blade")]}
-    repaired = {"title": "T", "machine": None, "steps": [_watched(0, "red stop button", "gear")]}
     good = {"red stop button", "gear"}
-
     out = procedures._validate_and_repair(
-        proc, frames, "t", hint=None,
-        segment_fn=lambda p, f: ["det"] if p in good else [], generate_fn=lambda: repaired,
-    )
+        proc, [b"f0"], segment_fn=lambda p, f: ["det"] if p in good else [],
+        repair_fn=lambda items, fr: {items[0]["id"]: ["toothed disc", "gear"]})
     v = out["_validation"]
     assert v["repaired"] is True and v["watch_missing_before"] == ["circular saw blade"]
     assert out["steps"][0]["watch_for"][0] == {"phrase": "gear", "role": "hazard", "trackable": True}
@@ -141,18 +130,30 @@ def test_unfound_hazard_phrase_triggers_a_repair():
 
 
 def test_hazard_still_unfound_is_marked_not_trackable():
-    frames = [b"f0"]
     proc = {"title": "T", "machine": None, "steps": [_watched(0, "red stop button", "saw blade")]}
-
     out = procedures._validate_and_repair(
-        proc, frames, "t", hint=None,
-        segment_fn=lambda p, f: ["det"] if p == "red stop button" else [],
-        generate_fn=lambda: {"title": "T", "machine": None,
-                             "steps": [_watched(0, "red stop button", "blade")]},
-    )
+        proc, [b"f0"], segment_fn=lambda p, f: ["det"] if p == "red stop button" else [],
+        repair_fn=lambda items, fr: {items[0]["id"]: ["blade"]})
     item = out["steps"][0]["watch_for"][0]
-    assert item["trackable"] is False
-    assert out["_validation"]["watch_untracked"] == [item["phrase"]]
+    assert item["trackable"] is False and item["phrase"] == "saw blade"
+    assert out["_validation"]["watch_untracked"] == ["saw blade"]
+
+
+def test_merge_maps_each_step_to_a_frame_of_the_whole_take(monkeypatch):
+    from backend import meta_client
+    seen = {}
+
+    def fake(system, content, **k):
+        seen["text"] = content[0]["text"]
+        return {"title": "Job", "steps": [{"title": "A", "instruction": "Do A", "target_phrase": "valve", "frame": 57},
+                                          {"title": "B", "instruction": "Do B", "target_phrase": "cap", "frame": 999}]}
+    monkeypatch.setattr(meta_client, "reason_json", fake)
+    drafts = [{"title": "Job", "steps": [{"title": "A", "instruction": "Do A", "frame": 57}]},
+              {"title": "Job", "steps": [{"title": "B", "instruction": "Do B", "frame": 120}]}]
+    out = procedures.merge_drafts(drafts, n_frames=200)
+    assert '"frame": 57' in seen["text"] and '"part": 2' in seen["text"]
+    assert out["steps"][0]["keyframe_index"] == 57
+    assert 0 <= out["steps"][1]["keyframe_index"] < 200           # a bad frame number is clamped
 
 
 def test_sam_error_does_not_mark_a_phrase_untrackable():

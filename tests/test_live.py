@@ -77,6 +77,7 @@ def ctx(tmp_path, monkeypatch):
     from backend import config, db, guide
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "t.db")
     monkeypatch.setattr(config, "MEDIA_DIR", tmp_path)
+    monkeypatch.setattr(config, "TAKES_DIR", tmp_path / "takes")
     monkeypatch.setattr(config, "VOICE", False)
     monkeypatch.setattr(config, "WATCH_GROUND_INTERVAL_S", 0.0)
     monkeypatch.setattr(config, "WATCH_JUDGE_INTERVAL_S", 0.0)
@@ -344,6 +345,7 @@ def test_capture_pause_ignores_frames_and_marks_steps(tmp_path, monkeypatch):
     from backend import config, db
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "c.db")
     monkeypatch.setattr(config, "VOICE", False)
+    monkeypatch.setattr(config, "TAKES_DIR", tmp_path / "takes")
     db.init()
     from backend.main import app
     with TestClient(app).websocket_connect("/ws/capture") as ws:
