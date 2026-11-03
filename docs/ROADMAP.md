@@ -95,4 +95,4 @@ What funded startups and incumbents do, and where Ustad stands apart.
 | iPhone camera recovery | `39c7562` |
 | Self-healing mic, backup narration, dark notice, telemetry | `b59d3d3` |
 | Project docs | `d52721e` |
-| Expert reference, Ask Ustad, Show me, coaching, offline resilience, evidence pack, self-improving procedures | 2026-11-03 13:40 (see TIMELINE) |
+| Expert reference, Ask Ustad, Show me, coaching, offline resilience, evidence pack, self-improving procedures | `12d9a9f` |
