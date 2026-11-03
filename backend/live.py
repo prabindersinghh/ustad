@@ -37,7 +37,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from . import config, db, guide, meta_client, procedures, sam_parse
-from .realtime import VoiceRelay, intent_of, is_question
+from .realtime import VoiceRelay, intent_of, is_howto, is_question
 
 log = logging.getLogger("ustad.live")
 
@@ -154,7 +154,8 @@ class GuideSession:
         self.skipped: list[int] = []      # step indexes skipped; audited at the end
         self.voice: VoiceRelay | None = None
         self.watcher: asyncio.Task | None = None
-        self.judging: asyncio.Task | None = None
+        self.judges: set[asyncio.Task] = set()  # background judges in flight
+        self.held_rejudged = -1                 # gen in which a held-still view was re-judged
         self.counts = {"frames": 0, "dark": 0, "audio_bytes": 0}   # logged at close
         self.dark_said = 0.0
         self.diag_gate = _RateGate(6, 60.0)     # the phone sends one every 15 s
@@ -376,8 +377,8 @@ class GuideSession:
         listening = time.monotonic() < self.listen_until
         if listening and intent not in ("done", "skip", "repeat"):
             intent = None
-        log.info("voice %r -> %s", text, intent or ("ask" if listening or is_question(text) else "-"))
-        if intent is None and (listening or is_question(text)):
+        log.info("voice %r -> %s", text, intent or ("ask" if listening or is_question(text) or is_howto(text) else "-"))
+        if intent is None and (listening or is_question(text) or is_howto(text)):
             self.listen_until = 0.0
             await self.ask(text, source="voice")
         elif intent == "done":
@@ -445,6 +446,9 @@ class GuideSession:
         run a check, or call a supervisor."""
         if self.proc is None or self.session_id is None or self.finished:
             return
+        if not coach and is_howto(question):
+            await self._instant_help(question, source)
+            return
         if self.asking and not self.asking.done():
             return                                   # one answer at a time
         if not self.ask_gate.allow():
@@ -453,6 +457,32 @@ class GuideSession:
         # Its own task: the voice reader that heard the question keeps
         # transcribing while Spark thinks.
         self.asking = asyncio.create_task(self._answer(question, source=source, coach=coach))
+
+    async def _instant_help(self, question: str, source: str) -> None:
+        """ "What do I do?" answered at once, with no model call: the step's
+        instruction in the expert's own words, their photo, and the part lit
+        up in the live view. A model answer took ~4 s; this takes none."""
+        assert self.proc is not None and self.session_id is not None
+        step, idx = self.step, self.idx
+        say = step.get("instruction", "")
+        if step.get("expert_said"):
+            say += f" The expert says: {step['expert_said']}"
+        tips = [t for t in step.get("tips") or [] if isinstance(t, str)]
+        if tips:
+            say += f" Tip: {tips[-1]}"
+        await self.out.send({"type": "answer", "say": say, "tool": "answer", "instant": True})
+        await self.speak(say, step=idx + 1, of=len(self.proc["steps"]), aside=True)
+        ref = self._reference_msg(step)
+        if ref:
+            await self.out.send(ref)
+        g = self.grounding
+        if g and g.gen == self.gen and g.detections:
+            await self.out.send({"type": "point", "label": step.get("target_phrase") or "here",
+                                 "detections": [d.to_dict() for d in g.detections]})
+        db.log_step_event(self.session_id, idx, "asked",
+                          reason=f"Q: {clean_for_log(question, 200)} | A: (instant) {clean_for_log(say, 300)}",
+                          latency_ms=0)
+        log.info("ask (%s) %r -> instant help from the step", source, question[:80])
 
     async def _answer(self, question: str, *, source: str, coach: bool) -> None:
         assert self.proc is not None and self.session_id is not None
@@ -544,7 +574,11 @@ class GuideSession:
         try:
             while not self.finished and not self.out.closed:
                 await asyncio.sleep(0.1)
-                if self.proc is None or self.latest is None:
+                # Re-check after the sleep: the last step may have passed
+                # meanwhile, leaving idx one past the end of the steps.
+                if self.finished or self.out.closed:
+                    break
+                if self.proc is None or self.latest is None or self.idx >= len(self.proc["steps"]):
                     continue
                 frame, frame_at = self.latest
                 now = time.monotonic()
@@ -573,23 +607,30 @@ class GuideSession:
                     last_ground, last_ground_frame_at = now, frame_at
                     inflight.add(asyncio.create_task(self._ground(self.gen, self.step, frame, frame_at)))
 
-                # 2. background judge on the grounded frame. A confirmation
-                # (second pass) must look at a newer view than the first.
-                # Confirmation needs a newer view, or the same view held still
-                # for a moment. A routine look only happens on a view not yet
-                # judged, so a camera resting on the bench costs nothing.
+                # 2. background judges on grounded frames, pipelined: a judge
+                # call takes ~4.5 s, so up to WATCH_JUDGE_PARALLEL run at once,
+                # started WATCH_JUDGE_INTERVAL_S apart on views not yet judged.
+                # Auto-advance still needs two agreeing passes, on different
+                # frames (or one view held still); pipelining makes the second
+                # land ~2 s after the first instead of a whole call later.
+                # A camera resting on the bench costs nothing: no new view,
+                # no judge (except one re-look to confirm a held-still view).
+                self.judges = {t for t in self.judges if not t.done()}
                 g = self.grounding
-                if self.auto_streak > 0:
-                    due = g is not None and (g.at > self.auto_seen_at or g.seen - self.auto_seen_at >= 1.5)
-                else:
-                    due = (g is not None and g.at > self.last_judged_at
-                           and now - last_judge >= config.WATCH_JUDGE_INTERVAL_S)
+                held = (g is not None and self.auto_streak > 0 and g.at == self.auto_seen_at
+                        and g.seen - self.auto_seen_at >= 1.5 and self.held_rejudged != self.gen)
+                # No look while SAM can't see the part: it could only ask for
+                # a better view, and it would cost a call.
+                due = g is not None and bool(g.detections) and (g.at > self.last_judged_at or held)
                 if (config.AUTO_ADVANCE and due and not self.busy and g.gen == self.gen
-                        and (self.judging is None or self.judging.done())
+                        and len(self.judges) < config.WATCH_JUDGE_PARALLEL
+                        and now - last_judge >= config.WATCH_JUDGE_INTERVAL_S
                         and now - self.step_started >= config.WATCH_JUDGE_AFTER_S
                         and self._timer_left() == 0):    # a timed step can't finish early
                     last_judge = now
-                    self.judging = asyncio.create_task(self._background_judge(g))
+                    if held:
+                        self.held_rejudged = self.gen
+                    self.judges.add(asyncio.create_task(self._background_judge(g)))
         except asyncio.CancelledError:
             pass
         except Exception:  # noqa: BLE001
@@ -629,7 +670,8 @@ class GuideSession:
 
     async def _background_judge(self, g: _Grounding) -> None:
         gen0, step, attempt = g.gen, self.step, self.attempt
-        self.last_judged_at = g.at
+        frame_at = g.at                     # g.seen moves on; the frame judged doesn't
+        self.last_judged_at = max(self.last_judged_at, frame_at)
         try:
             action = await asyncio.to_thread(
                 guide.judge_step, step, g.frame, attempt=attempt, detections=g.detections, context=g.context,
@@ -642,16 +684,35 @@ class GuideSession:
         if gen0 != self.gen or self.busy or self.finished:
             return
         detail = action["detail"]
-        if action["tool"] == "verify_step" and (detail.get("confidence") or 0) >= config.AUTO_CONFIDENCE:
-            self.auto_streak += 1
-            if self.auto_streak == 1:
-                self.auto_seen_at = g.at
-                await self.out.send({"type": "auto", "state": "looks_done"})
-                return                      # confirm on a newer frame
+        conf = detail.get("confidence") or 0
+        # One very confident look, with SAM seeing the part, is enough for an
+        # ordinary visual step (a "done" tap is one look too). Lockout,
+        # reading, timed and confirm steps still need two agreeing looks.
+        if (action["tool"] == "verify_step" and conf >= config.AUTO_SINGLE_CONFIDENCE
+                and inferable(step) and g.detections):
             async with self.lock:
                 if gen0 != self.gen or self.busy:
                     return
                 await self._finish(action, g.frame, source="auto")
+            return
+        if action["tool"] == "verify_step" and conf >= config.AUTO_CONFIDENCE:
+            if self.auto_streak == 0:
+                self.auto_streak, self.auto_seen_at = 1, frame_at
+                await self.out.send({"type": "auto", "state": "looks_done"})
+                return                      # confirm on another frame
+            # Confirmation: a different frame from the first pass, or the
+            # same view held still for a moment. Out of order is fine: two
+            # different frames that both pass is what counts.
+            if frame_at == self.auto_seen_at and g.seen - frame_at < 1.5:
+                return
+            async with self.lock:
+                if gen0 != self.gen or self.busy:
+                    return
+                await self._finish(action, g.frame, source="auto")
+            return
+        # A "not yet" on a view older than the first pass is stale (the
+        # worker may have finished since): it must not cancel that pass.
+        if self.auto_streak and frame_at < self.auto_seen_at:
             return
         self.auto_streak = 0
         if action["tool"] == "flag_error" and detail.get("severity") == "danger" and self.hazard_spoken_gen != self.gen:
@@ -732,9 +793,11 @@ class GuideSession:
         )
         n = len(self.proc["steps"])
         await self.out.send({"type": "verdict", **action, "step": self.idx + 1, "source": source})
-        say = action.get("say") or ""
-        if source == "auto" and action["advance"]:
-            say = say or "That looks right."
+        # On a pass, one word and straight on to the next instruction: the
+        # model's sentence ("Good, the lid is open and the keyboard is
+        # visible") cost ~3 s of listening per step. Corrections keep the
+        # model's words: there the worker needs them.
+        say = "Done." if action["advance"] else (action.get("say") or "")
         if say:
             await self.speak(say, step=self.idx + 1, of=n)
 
@@ -855,7 +918,7 @@ class GuideSession:
         log.info("guide close: session %s, step %d, %d frames, %d dark, %d audio bytes",
                  self.session_id, self.idx + 1, self.counts["frames"], self.counts["dark"],
                  self.counts["audio_bytes"])
-        for t in (self.watcher, self.judging, self.asking):
+        for t in (self.watcher, self.asking, *self.judges):
             if t and not t.done():
                 t.cancel()
         if self.voice:

@@ -402,6 +402,7 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .ref-close { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,.55); color: #fff; font-size: 18px; line-height: 1; cursor: pointer; }
 
 .pack-link { display: block; margin: 0 0 16px; padding: 15px; text-align: center; font-weight: 700; color: #fff; background: var(--blue); border-radius: 14px; text-decoration: none; box-shadow: var(--shadow-sm); }
+.pack-link.again { width: 100%; border: none; font: inherit; font-weight: 700; cursor: pointer; background: #fff; color: var(--blue); box-shadow: inset 0 0 0 2px var(--blue); }
 .event.asked { border-left-color: #ffc53d; } .event.help { border-left-color: var(--bad); }
 
 /* capture: steps forming as the expert talks */

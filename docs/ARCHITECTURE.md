@@ -44,7 +44,7 @@ lands here in the same commit.
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
 | `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal). |
-| `tests/` | 120 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
+| `tests/` | 135 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
 
@@ -132,11 +132,16 @@ approved improvements.
   item, and "human hand" when a hazard is watched, all in parallel. Sends
   `track` with the objects. `hand_near` triggers `proximity` and a spoken
   warning (throttled to 6 s).
-- **Background judge:** at `WATCH_EFFORT` (minimal) on the grounded frame. It
-  auto-advances after **two** confident passes on a newer view, or on the same
-  view held still. Timed steps can't finish early.
+- **Background judges** (pipelined): at `WATCH_EFFORT` (minimal) on grounded
+  frames, up to 3 in flight, one started per second at most, each on a view
+  not yet judged and only while SAM sees the target. An ordinary visual step
+  advances on **one** pass at ≥ 0.9; lockout, reading, timed and confirm steps
+  need **two** passes (different frames in any order, or one view held still;
+  a stale "not yet" from an older frame can't cancel a newer pass). Timed
+  steps can't finish early. A pass is spoken as "Done." and the next
+  instruction follows at once.
 - **Explicit check:** triggered by the "done" voice intent or a tap. Runs
-  `judge_step` at `JUDGE_EFFORT` (low), reusing a fresh grounding (under
+  `judge_step` at `JUDGE_EFFORT` (minimal), reusing a fresh grounding (under
   2.5 s old) when there is one. Spark must call exactly one tool:
   `verify_step`, `flag_error` or `request_better_view`. A reading out of
   range is overridden to `flag_error` on the server.
@@ -287,10 +292,10 @@ a cent.
 | `SPARK_MODEL` · `SAM_MODEL` · `ASR_MODEL` | muse-spark-1.3 · sam-3.1 · muse-voice-transcribe-1.0 | Models. |
 | `REASONING_BACKEND` | hosted | `open` routes reasoning to Glimmer (`OPEN_BASE_URL`, `OPEN_MODEL`, `OPEN_FALLBACK`). |
 | `WATCH_GROUND_INTERVAL_S` · `WATCH_GROUND_PARALLEL` | 1.0 · 2 | Live grounding rate. |
-| `WATCH_JUDGE_INTERVAL_S` · `WATCH_JUDGE_AFTER_S` | 5.0 · 4.0 | Background judge rate, and delay after a step starts. |
-| `AUTO_ADVANCE` · `AUTO_CONFIDENCE` | 1 · 0.8 | Auto-advance on two confident passes. |
+| `WATCH_JUDGE_INTERVAL_S` · `WATCH_JUDGE_PARALLEL` · `WATCH_JUDGE_AFTER_S` | 1.0 · 3 · 2.0 | Background judges: one started per second at most, up to 3 in flight, from 2 s into a step, only while SAM sees the part. |
+| `AUTO_ADVANCE` · `AUTO_CONFIDENCE` · `AUTO_SINGLE_CONFIDENCE` | 1 · 0.8 · 0.9 | Auto-advance on two passes at 0.8, or one at 0.9 for an ordinary visual step with the part in view. |
 | `GROUNDING_FRESH_S` | 2.5 | Reuse a grounding this recent for a check. |
-| `JUDGE_EFFORT` · `WATCH_EFFORT` · `JUDGE_MAX_OUTPUT_TOKENS` | low · minimal · 1600 | Reasoning effort and output cap. |
+| `JUDGE_EFFORT` · `WATCH_EFFORT` · `JUDGE_MAX_OUTPUT_TOKENS` | minimal · minimal · 1600 | Reasoning effort and output cap. |
 | `WRITER_EFFORT` · `REPAIR_EFFORT` | low · minimal | Writing a procedure (or a part); renaming parts SAM missed. |
 | `SEGMENT_S` · `SEGMENT_KEYFRAMES` | 240 · 8 | Long takes: part length and frames per part. |
 | `TAKES_DIR` | data/takes | A take's frames on disk until its procedure is saved. |

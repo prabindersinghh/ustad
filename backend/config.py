@@ -73,19 +73,29 @@ TAKES_DIR = ROOT / "data" / "takes"
 # --------------------------------------------------------------------------
 WATCH_GROUND_INTERVAL_S = float(os.getenv("WATCH_GROUND_INTERVAL_S", "1.0"))
 WATCH_GROUND_PARALLEL = int(os.getenv("WATCH_GROUND_PARALLEL", "2"))
-WATCH_JUDGE_INTERVAL_S = float(os.getenv("WATCH_JUDGE_INTERVAL_S", "5.0"))
+# A judge call takes ~4.5 s (measured on a real job, any effort or image
+# size), so judges are pipelined: up to WATCH_JUDGE_PARALLEL in flight,
+# started this far apart, each on a view not yet judged. Done to advance:
+# ~6 s instead of the ~15 to 20 s of one judge every 5 s.
+WATCH_JUDGE_INTERVAL_S = float(os.getenv("WATCH_JUDGE_INTERVAL_S", "1.0"))
+WATCH_JUDGE_PARALLEL = int(os.getenv("WATCH_JUDGE_PARALLEL", "3"))
 # Don't judge in the first seconds of a step: the worker hasn't started yet.
-WATCH_JUDGE_AFTER_S = float(os.getenv("WATCH_JUDGE_AFTER_S", "4.0"))
+WATCH_JUDGE_AFTER_S = float(os.getenv("WATCH_JUDGE_AFTER_S", "2.0"))
 # Auto-advance needs two background passes in a row at this confidence.
 AUTO_ADVANCE = os.getenv("AUTO_ADVANCE", "1") != "0"
 AUTO_CONFIDENCE = float(os.getenv("AUTO_CONFIDENCE", "0.8"))
+# ...or one pass at this confidence, with SAM seeing the target, for an
+# ordinary visual step (never a hazard, reading, timed or confirm step).
+AUTO_SINGLE_CONFIDENCE = float(os.getenv("AUTO_SINGLE_CONFIDENCE", "0.9"))
 # A grounding is reused for "done" only if its frame is at most this old.
 GROUNDING_FRESH_S = float(os.getenv("GROUNDING_FRESH_S", "2.5"))
 VOICE = os.getenv("VOICE", "1") != "0"
 
 # Muse Spark reasoning effort per call type (measured on fixed frames: default
 # ~4 s and up to 23 s live, low ~2.4 s, minimal ~1.8 s, all 6/6 correct).
-JUDGE_EFFORT = os.getenv("JUDGE_EFFORT", "low")          # operator said "done": must be right
+# Operator said "done". 2026-11-04, the user's real job: minimal 4.5 s median
+# 6/6 right; low 5.5 s 6/6, with an 11 s worst case live. Minimal it is.
+JUDGE_EFFORT = os.getenv("JUDGE_EFFORT", "minimal")
 WATCH_EFFORT = os.getenv("WATCH_EFFORT", "minimal")      # background look; two passes must agree
 JUDGE_MAX_OUTPUT_TOKENS = int(os.getenv("JUDGE_MAX_OUTPUT_TOKENS", "1600"))
 # Show the judge the expert's own keyframe for the step next to the worker's

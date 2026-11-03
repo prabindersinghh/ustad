@@ -57,7 +57,7 @@ const Voice = {
     // Queue rather than cancel: "Good, cap's tight." then the next step's
     // instruction should both be heard, in order.
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.02;
+    u.rate = 1.08;                          // a little brisk: instructions are short
     u.onend = u.onerror = () => { this.quietUntil = Date.now() + 450; };
     this.quietUntil = Date.now() + 60000;   // until onend says otherwise
     window.speechSynthesis.speak(u);
@@ -174,11 +174,18 @@ const Mic = {
     this.onlevel = onlevel || null;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!this.ctx || this.ctx.state === 'closed') this.ctx = new AC();
+    // A newer start() or a stop() may run while this one waits: the iPhone
+    // log showed "this.ctx is null" from exactly that. Work on a local
+    // context and give way to whoever came later.
+    const ctx = this.ctx, my = (this.startGen = (this.startGen || 0) + 1);
     // resume() outside a gesture can hang on iOS rather than reject.
-    await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, 800))]);
-    if (this.ctx.state !== 'running') {
-      this.stop();
-      throw new Error('audio suspended');     // caller falls back to MediaRecorder
+    await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 800))]);
+    if (my !== this.startGen || this.ctx !== ctx) throw new Error('mic restarted');
+    if (ctx.state !== 'running') {
+      // Keep the context: it was unlocked by a tap and a later resume (the
+      // next tap) can still bring it up. Closing it threw that away.
+      this.disconnect();
+      throw new Error('audio suspended');     // caller falls back, and retries on the next tap
     }
     // iOS drops the context to "interrupted" for calls, Siri and its own
     // speech; pick it back up rather than going quiet for the rest of the job.
@@ -875,7 +882,10 @@ function mmss(s) {
 /* ------------------------------------------------------------ library */
 
 const Library = {
-  async open(highlightId) {
+  /* `highlightId` marks one procedure: just captured, or opened from a
+   * dashboard "Run" link. Starting it still takes a tap, which iOS needs
+   * before it allows the microphone. */
+  async open(highlightId, label = 'Just captured') {
     Capture.teardown();
     show('library');
     const list = $('library-list');
@@ -899,12 +909,14 @@ const Library = {
           el.classList.add('fresh');
           const tag = document.createElement('span');
           tag.className = 'fresh-tag';
-          tag.textContent = 'Just captured';
+          tag.textContent = label;
           el.prepend(tag);
         }
         el.onclick = () => Guide.open(p.id);
         list.appendChild(el);
       });
+      const fresh = list.querySelector('.card.fresh');
+      if (fresh) fresh.scrollIntoView({ block: 'center' });
     } catch (err) {
       list.innerHTML = '<div class="empty">Could not load procedures.</div>';
     }
@@ -987,8 +999,19 @@ const Guide = {
         $('guide-hints').classList.add('on');
       } catch (err) {
         Diag.note('mic', err.message);
-        $('guide-hints').classList.remove('on');
-        this.toast('Voice commands are off on this phone. Use the buttons below.');
+        if (err.message !== 'mic restarted') {
+          $('guide-hints').classList.remove('on');
+          this.toast('Tap the screen once to turn on voice commands.');
+          // iOS lets audio start inside a tap: try again on the next one.
+          const retry = async () => {
+            Mic.prime();
+            if (!this.ws || this.ws.readyState !== 1) return;
+            try { await Mic.start(MediaSource_.stream, this.micSend); $('guide-hints').classList.add('on'); this.toast('Voice commands on'); }
+            catch (e) { Diag.note('mic retry', e.message); }
+          };
+          document.addEventListener('touchend', retry, { once: true });
+          document.addEventListener('click', retry, { once: true });
+        }
       }
       const report = () => Diag.flush(this.ws, { frames: this.sent.frames, stills: this.sent.stills, dark: this.sent.dark });
       report();
@@ -1583,7 +1606,11 @@ const Report = {
          <div class="kpi"><b>${fails}</b><span>caught</span></div>
          <div class="kpi"><b>${asked ? asked : avg + ' s'}</b><span>${asked ? 'questions answered' : 'per check'}</span></div>
        </div>
-       <a class="pack-link" href="/evidence?s=${encodeURIComponent(sessionId)}" target="_blank" rel="noopener">Open the evidence pack</a>`;
+       <a class="pack-link" href="/evidence?s=${encodeURIComponent(sessionId)}" target="_blank" rel="noopener">Open the evidence pack</a>
+       <button class="pack-link again" id="report-again">Run this procedure again</button>`;
+    const pid = data.session && data.session.procedure_id;
+    if (pid) $('report-again').onclick = () => Guide.open(pid);
+    else $('report-again').remove();
 
     const LABEL = { asked: 'question', help: 'supervisor needed', notice: 'notice' };
     events.forEach((e) => {
@@ -1685,6 +1712,13 @@ function clearCameraError(wrapEl) {
 }
 
 /* -------------------------------------------------------------- boot */
+
+/* A dashboard "Run" link: /?run=<procedure id> opens the procedure list
+ * with that one ready, one tap from starting. */
+(function runLink() {
+  const pid = new URLSearchParams(location.search).get('run');
+  if (pid) Library.open(pid, 'Ready to run. Tap to start');
+})();
 
 fetch('/api/health')
   .then((r) => r.json())

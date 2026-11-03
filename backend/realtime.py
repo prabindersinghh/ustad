@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Awaitable, Callable
 
@@ -186,6 +187,20 @@ def is_question(text: str) -> bool:
     if "?" in text or words[0].strip("'") in _QUESTION_START:
         return True
     return any(f" {h} " in f" {t.rstrip('?.!')} " for h in _HELP)
+
+
+_HOWTO = re.compile(
+    r"\b(what (do|should|shall) i do|what (now|next)|what'?s next|what to do|what am i (supposed to |meant to )?do"
+    r"|how (do|should|can) i (do|start)( (it|this|that))?\b|how to do|how does this go|show me how"
+    r"|help( me)?$|^help\b|i('?m| am) stuck|i don'?t (know|get it)|i'?m lost|tell me again)")
+
+
+def is_howto(text: str) -> bool:
+    """A generic "how do I do this?" (not a specific question): answered at
+    once from the step itself (the instruction, the expert's own words,
+    their photo, the live highlight), with no model call."""
+    t = " ".join(text.lower().replace(",", " ").split()).rstrip("?.!")
+    return 0 < len(t.split()) <= 7 and bool(_HOWTO.search(t))
 
 
 def intent_of(text: str) -> str | None:

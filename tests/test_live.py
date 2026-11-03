@@ -97,7 +97,7 @@ def ctx(tmp_path, monkeypatch):
 
     def fake_judge(step, frame, *, worker_said=None, attempt=1, detections=None, **_):
         calls["judge"].append({"said": worker_said, "pre_grounded": detections is not None})
-        return dict(_action(plan["tool"]))
+        return dict(_action(plan["tool"], plan.get("conf", 0.95)))
 
     monkeypatch.setattr(guide, "ground", fake_ground)
     monkeypatch.setattr(guide, "ground_scene",
@@ -131,6 +131,7 @@ def test_watch_frame_produces_live_track(ctx):
 
 def test_auto_advance_needs_two_confident_passes(ctx):
     client, pid, calls, plan, db = ctx
+    plan["conf"] = 0.85                           # confident, but not enough for a single look
     with client.websocket_connect("/ws/guide") as ws:
         ws.send_json({"type": "start", "procedure_id": pid})
         _until(ws, "speak")
@@ -145,6 +146,94 @@ def test_auto_advance_needs_two_confident_passes(ctx):
         ws.send_json({"type": "abort"})
     events = db.session_log(db.list_sessions()[0]["id"])["events"]
     assert events[0]["verdict"] == "pass" and events[0]["reason"].startswith("[auto]")
+
+
+def test_one_very_confident_look_advances_a_visual_step(ctx):
+    client, pid, calls, plan, db = ctx
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "watch", "data": FRAME})
+        verdict = _until(ws, "verdict")                  # no "looks_done" wait for a second look
+        assert verdict["source"] == "auto" and verdict["advance"] is True
+        ws.send_json({"type": "abort"})
+    assert len([c for c in calls["judge"] if c["said"].startswith("(nothing")]) >= 1
+
+
+def test_a_hazard_step_still_needs_two_looks(ctx):
+    client, pid, calls, plan, db = ctx
+    gated = db.save_procedure("Gated", steps=[
+        {"index": 0, "title": "Lock out", "instruction": "Lock out the isolator", "target_phrase": "isolator",
+         "success_criteria": "lock on", "hazard": "Lock out first."},
+        {"index": 1, "title": "B", "instruction": "do 1", "target_phrase": "valve"}])
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": gated})
+        _until(ws, "speak")
+        ws.send_json({"type": "watch", "data": FRAME})
+        assert _until(ws, "auto")["state"] == "looks_done"   # 0.95, but a safety step: wait for a second look
+        ws.send_json({"type": "abort"})
+
+
+def test_a_pass_is_said_in_one_word_then_the_next_step(ctx):
+    client, pid, calls, plan, db = ctx
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "check", "data": FRAME, "said": "done"})
+        _until(ws, "verdict")
+        assert _until(ws, "speak")["text"] == "Done."          # not the model's sentence
+        assert _until(ws, "speak")["text"] == "do 1"           # straight into the next instruction
+        ws.send_json({"type": "abort"})
+
+
+def test_a_stale_not_yet_cannot_cancel_a_newer_pass(monkeypatch):
+    import asyncio
+    sent = []
+
+    class WS:
+        async def send_json(self, obj):
+            sent.append(obj)
+
+    s = live.GuideSession(WS())
+    s.proc = {"steps": [{"index": 0, "title": "A", "instruction": "a", "target_phrase": "valve"}]}
+    s.session_id = "sess"
+    verdicts = {b"new": "verify_step", b"old": "flag_error"}
+    monkeypatch.setattr(guide, "judge_step", lambda step, frame, **k: _action(verdicts[frame]))
+    newer, older = live._Grounding(0, b"new", 2.0, []), live._Grounding(0, b"old", 1.0, [])
+
+    async def run():
+        await s._background_judge(newer)       # pipelined: the newer view comes back first, passing
+        await s._background_judge(older)       # then an older "not yet" lands late
+    asyncio.run(run())
+    assert s.auto_streak == 1 and s.auto_seen_at == 2.0      # the pass still stands
+
+
+@pytest.mark.parametrize("text,yes", [
+    ("what do I do", True), ("what now?", True), ("help", True), ("how do I do this", True),
+    ("I'm stuck", True), ("show me how", True), ("what's next", True),
+    ("how tight should the bolt be", False), ("which spanner do I use", False),
+    ("what do I do if the light stays red after I press reset twice", False),   # long: needs Spark
+])
+def test_generic_howto_questions_are_recognised(text, yes):
+    from backend.realtime import is_howto
+    assert is_howto(text) is yes
+
+
+def test_how_do_i_do_this_is_answered_instantly_without_a_model(ctx, monkeypatch):
+    client, pid, calls, plan, db = ctx
+    plan["tool"] = "request_better_view"
+    monkeypatch.setattr(guide, "answer_question",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no model call for how-to")))
+    with client.websocket_connect("/ws/guide") as ws:
+        ws.send_json({"type": "start", "procedure_id": pid})
+        _until(ws, "speak")
+        ws.send_json({"type": "ask", "text": "what do I do"})
+        ans = _until(ws, "answer")
+        assert ans["instant"] is True and ans["say"].startswith("do 0")
+        assert _until(ws, "speak")["aside"] is True
+        ws.send_json({"type": "abort"})
+    events = db.session_log(db.list_sessions()[0]["id"])["events"]
+    assert any(e["verdict"] == "asked" and "(instant)" in e["reason"] for e in events)
 
 
 def test_done_reuses_live_grounding(ctx):

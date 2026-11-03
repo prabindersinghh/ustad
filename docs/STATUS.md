@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 120 passing
+**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 135 passing
 **Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $2.16 of the $50 working cap
 
 ## In one paragraph
@@ -30,6 +30,8 @@ approval makes a new version.
 
 | Capability | Evidence |
 |---|---|
+| Guiding is fast: about 7 s per step from the finished state to the next instruction (was 11.5 to 30 s), on the user's real job; instant answer to "what do I do" | Real models 2026-11-04 01:30, same photos old vs new; tests |
+| Run any procedure again from the dashboard (link, QR, copy) or from the report | Browser 2026-11-04 |
 | Capture build is fast and survives a drop: 17.2 s for the user's real take (was 87 s); browser test delivered the procedure 15 s after a mid-build drop | Real models 2026-11-03 22:30; browser test |
 | Long recordings (up to 2 h): written in parts while recording, merged at stop | Real models: 3 parts, 9.2 s left at stop; test |
 | iPhone mic works (worklet path) | iPhone `diag` 2026-11-03 13:49 |
