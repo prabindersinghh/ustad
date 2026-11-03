@@ -32,6 +32,7 @@ def cap(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "VOICE", False)
     db.init()
     live._TAKES.clear()
+    live._take_gates.clear()
     built = {}
 
     def fake_build(transcript, keyframes, *, hint=None, frame_times=None):
@@ -114,7 +115,9 @@ def test_offline_audio_and_takes_are_bounded(cap, monkeypatch):
         assert sum(len(p) for _, p in live._TAKES[cid].gaps) == 50000
     # The take above is detached but kept, waiting for its phone. With room
     # for one take, someone else is refused: never evicted for another client.
+    # (Pretend the test client is the local tunnel, so the header counts.)
     monkeypatch.setattr(live, "MAX_TAKES", 1)
+    monkeypatch.setattr(live, "_client_of", lambda ws: ws.headers.get("cf-connecting-ip") or "testclient")
     with client.websocket_connect("/ws/capture", headers={"cf-connecting-ip": "203.0.113.9"}) as ws:
         ws.send_json({"type": "start"})
         assert "busy" in _until(ws, "error")["message"]
@@ -124,6 +127,33 @@ def test_offline_audio_and_takes_are_bounded(cap, monkeypatch):
         ws.send_json({"type": "start"})
         new = _until(ws, "capture")["capture_id"]
         assert list(live._TAKES) == [new]
+
+
+def test_client_identity_trusts_the_tunnel_header_only_from_loopback():
+    class WS:
+        def __init__(self, host, header=None):
+            self.client = type("C", (), {"host": host})()
+            self.headers = {"cf-connecting-ip": header} if header else {}
+    assert live._client_of(WS("127.0.0.1", "198.51.100.7")) == "198.51.100.7"   # via cloudflared
+    assert live._client_of(WS("192.168.1.20", "1.2.3.4")) == "192.168.1.20"     # LAN: header ignored
+    assert live._client_of(WS("::1")) == "::1"
+
+
+def test_near_empty_abandoned_takes_free_their_slot_quickly(cap, monkeypatch):
+    client, built, db = cap
+    with client.websocket_connect("/ws/capture") as ws:
+        ws.send_json({"type": "start"})
+        cid = _until(ws, "capture")["capture_id"]
+        ws.send_json({"type": "frame", "data": FRAME})        # one frame: kept on drop, but near-empty
+        _until(ws, "frame_ack")
+    live._TAKES[cid].detached_at -= live.TAKE_TTL_EMPTY_S + 1
+    assert live._admit_take("someone-else") and cid not in live._TAKES
+
+
+def test_take_creation_is_rate_limited_per_client(cap):
+    assert all(live._admit_take("burst") for _ in range(6))
+    assert not live._admit_take("burst")
+    assert live._admit_take("another")
 
 
 def test_rejoin_to_an_unknown_take_says_so(cap):

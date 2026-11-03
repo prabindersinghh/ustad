@@ -889,11 +889,21 @@ MAX_GAP_BYTES = 16000 * 2 * 600             # 10 min of offline narration per ta
 _TAKES: dict[str, "CaptureSession"] = {}
 
 
+TAKE_TTL_EMPTY_S = 120                      # a detached take with almost nothing in it
+_take_gates: dict[str, _RateGate] = {}      # new takes per client: 6 per 10 min
+
+
 def _client_of(ws: WebSocket) -> str:
     """Who opened this socket. Behind the Cloudflare tunnel every peer is
-    127.0.0.1, so the tunnel's CF-Connecting-IP header names the phone."""
-    ip = ws.headers.get("cf-connecting-ip") if hasattr(ws, "headers") else None
-    return ip or (ws.client.host if getattr(ws, "client", None) else "?")
+    the local cloudflared, which sets CF-Connecting-IP to the phone's real
+    address (Cloudflare overwrites any value a client sends). The header is
+    trusted only from loopback: a direct LAN client is its own address."""
+    host = ws.client.host if getattr(ws, "client", None) else "?"
+    if host in ("127.0.0.1", "::1"):
+        ip = ws.headers.get("cf-connecting-ip") if hasattr(ws, "headers") else None
+        if ip:
+            return ip
+    return host
 
 
 def _admit_take(owner: str) -> bool:
@@ -905,8 +915,16 @@ def _admit_take(owner: str) -> bool:
     give way. When full, new takes are refused (a busy server, not lost work).
     """
     now = time.monotonic()
+    if len(_take_gates) > 2000:
+        _take_gates.clear()                      # bounded; a reset only loosens limits briefly
+    gate = _take_gates.setdefault(owner, _RateGate(6, 600.0))
+    if not gate.allow():
+        return False
     for cid, take in list(_TAKES.items()):
-        if take.detached_at and now - take.detached_at > TAKE_TTL_S:
+        # A real recording keeps its full grace period; a near-empty one
+        # (a few seconds, or junk holding a slot) is freed after 2 minutes.
+        ttl = TAKE_TTL_S if len(take.keyframes) >= 5 else TAKE_TTL_EMPTY_S
+        if take.detached_at and now - take.detached_at > ttl:
             _TAKES.pop(cid, None)
     mine = sorted((t.detached_at, cid) for cid, t in _TAKES.items() if t.owner == owner and t.detached_at)
     while mine and (len(_TAKES) >= MAX_TAKES
