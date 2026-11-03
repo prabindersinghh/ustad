@@ -112,13 +112,18 @@ def test_offline_audio_and_takes_are_bounded(cap, monkeypatch):
         # The first fits; the rest exceed the room left and are refused
         # before being decoded.
         assert sum(len(p) for _, p in live._TAKES[cid].gaps) == 50000
-    # The take above is detached but kept. With room for one take, a new
-    # recording evicts the longest-detached one rather than growing forever.
+    # The take above is detached but kept, waiting for its phone. With room
+    # for one take, someone else is refused: never evicted for another client.
     monkeypatch.setattr(live, "MAX_TAKES", 1)
+    with client.websocket_connect("/ws/capture", headers={"cf-connecting-ip": "203.0.113.9"}) as ws:
+        ws.send_json({"type": "start"})
+        assert "busy" in _until(ws, "error")["message"]
+    assert list(live._TAKES) == [cid]
+    # The same client may replace its own abandoned take.
     with client.websocket_connect("/ws/capture") as ws:
         ws.send_json({"type": "start"})
         new = _until(ws, "capture")["capture_id"]
-        assert list(live._TAKES) == [new] and cid not in live._TAKES
+        assert list(live._TAKES) == [new]
 
 
 def test_rejoin_to_an_unknown_take_says_so(cap):

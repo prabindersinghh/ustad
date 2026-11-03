@@ -883,21 +883,37 @@ def _mmss(seconds: float) -> str:
 # socket rejoins it (see CaptureSocket). Takes left alone this long are freed.
 TAKE_TTL_S = 20 * 60
 MAX_TAKES = 12                              # takes held in memory at once
+MAX_TAKES_PER_CLIENT = 4                    # per client address (a factory NAT shares one)
 MAX_KEYFRAMES = 400                         # per take
 MAX_GAP_BYTES = 16000 * 2 * 600             # 10 min of offline narration per take
 _TAKES: dict[str, "CaptureSession"] = {}
 
 
-def _prune_takes() -> None:
-    """Free takes left alone past the TTL; past MAX_TAKES, free the
-    longest-detached ones first. A take with a live socket is never freed."""
+def _client_of(ws: WebSocket) -> str:
+    """Who opened this socket. Behind the Cloudflare tunnel every peer is
+    127.0.0.1, so the tunnel's CF-Connecting-IP header names the phone."""
+    ip = ws.headers.get("cf-connecting-ip") if hasattr(ws, "headers") else None
+    return ip or (ws.client.host if getattr(ws, "client", None) else "?")
+
+
+def _admit_take(owner: str) -> bool:
+    """Make room for a new take from `owner`, or say no.
+
+    Takes past the TTL are freed. A take still inside its TTL is someone's
+    recording waiting for their phone to come back, so it is never evicted
+    for anyone else: only the same client's own oldest detached take can
+    give way. When full, new takes are refused (a busy server, not lost work).
+    """
     now = time.monotonic()
     for cid, take in list(_TAKES.items()):
         if take.detached_at and now - take.detached_at > TAKE_TTL_S:
             _TAKES.pop(cid, None)
-    detached = sorted((t.detached_at, cid) for cid, t in _TAKES.items() if t.detached_at)
-    while len(_TAKES) >= MAX_TAKES and detached:
-        _TAKES.pop(detached.pop(0)[1], None)
+    mine = sorted((t.detached_at, cid) for cid, t in _TAKES.items() if t.owner == owner and t.detached_at)
+    while mine and (len(_TAKES) >= MAX_TAKES
+                    or sum(1 for t in _TAKES.values() if t.owner == owner) >= MAX_TAKES_PER_CLIENT):
+        _TAKES.pop(mine.pop(0)[1], None)
+    return (len(_TAKES) < MAX_TAKES
+            and sum(1 for t in _TAKES.values() if t.owner == owner) < MAX_TAKES_PER_CLIENT)
 
 
 class CaptureSocket:
@@ -911,6 +927,7 @@ class CaptureSocket:
     def __init__(self, ws: WebSocket) -> None:
         self.out = _Socket(ws)
         self.take: CaptureSession | None = None
+        self.owner = _client_of(ws)
 
     async def on_text(self, msg: dict[str, Any]) -> bool:
         kind = msg.get("type")
@@ -926,11 +943,12 @@ class CaptureSocket:
             await take.attach(self.out, msg)
             return True
         if self.take is None:
-            _prune_takes()
-            if len(_TAKES) >= MAX_TAKES:
+            if not _admit_take(self.owner):
+                log.warning("capture refused for %s: %d takes held", clean_for_log(self.owner, 60), len(_TAKES))
                 await self.out.send({"type": "error", "message": "The server is busy with other recordings. Try again shortly."})
                 return False
             self.take = CaptureSession(self.out)
+            self.take.owner = self.owner
             _TAKES[self.take.capture_id] = self.take
         return await self.take.on_text(msg)
 
@@ -954,6 +972,7 @@ class CaptureSession:
         self.result: dict[str, Any] | None = None
         self.detached_at = 0.0
         self.rejoins = 0
+        self.owner = "?"                      # client address that started it
 
     def reset(self) -> None:
         self.keyframes: list[bytes] = []
