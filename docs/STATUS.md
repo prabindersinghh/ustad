@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 109 passing
+**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 112 passing
 **Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $1.85 of the $50 working cap
 
 ## In one paragraph
@@ -40,7 +40,7 @@ approval makes a new version.
 | Guide survives a network drop: unlimited retries, "done" tapped offline is checked on reconnect, resumes past skips with the attempt count | Browser: offline, tap, reconnect, correct verdict. Tests |
 | Half-open sockets detected (ping every 7 s, dead after 20 s silent) | Code; pong tested |
 | Evidence pack per job (`/evidence?s=`): steps, photos with SAM boxes, trail, questions, outcome, printable | Browser screenshot; tests |
-| Self-improving procedures: Spark proposes, SAM checks phrases on the expert photo, supervisor approves, new version, history kept | Live run gave 1 evidence-backed suggestion from 1 run. 5 tests, including safety (hazards only added, readings untouchable, stale suggestions refused) |
+| Self-improving procedures (supervisor token required; safety wording can't be dropped): Spark proposes, SAM checks phrases on the expert photo, supervisor approves, new version, history kept | Live run gave 1 evidence-backed suggestion from 1 run. 5 tests, including safety (hazards only added, readings untouchable, stale suggestions refused) |
 | Self-check rewrites target, hazard and tool phrases SAM can't find; unfound ones are marked "not trackable" | Unit tests plus a real SAM probe |
 | Live guide: grounding about 1 fps, 2 SAM calls in flight, two-pass auto-advance | Live API e2e; iPhone 2026-11-02 |
 | Voice: realtime ASR, done / repeat / skip / why / where, plus questions | Live runs; intent and question tests |

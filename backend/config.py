@@ -88,6 +88,29 @@ COACH_AFTER_FAILS = int(os.getenv("COACH_AFTER_FAILS", "2"))
 # Self-improving procedures: one considered Spark call per request, offline.
 IMPROVE_EFFORT = os.getenv("IMPROVE_EFFORT", "medium")
 
+
+def supervisor_token() -> str:
+    """The secret a supervisor enters to change procedures (Improve / apply).
+
+    From SUPERVISOR_TOKEN in .env, else generated once into
+    data/supervisor_token.txt (gitignored). The demo link is public, so
+    changing a procedure must need more than the URL. Never logged.
+    """
+    tok = os.getenv("SUPERVISOR_TOKEN", "").strip()
+    if tok:
+        return tok
+    path = ROOT / "data" / "supervisor_token.txt"
+    try:
+        tok = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        tok = ""
+    if not tok:
+        import secrets
+        tok = secrets.token_urlsafe(18)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(tok, encoding="utf-8")
+    return tok
+
 # --------------------------------------------------------------------------
 # Spend. Every call is metered at list price (dev.meta.ai/docs/pricing-rate-
 # limits) into the usage table. Near the budget, live watching switches off

@@ -10,6 +10,7 @@ phone for Ray-Ban Meta glasses later without touching this file.
 from __future__ import annotations
 
 import base64
+import hmac
 import json
 import logging
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,6 +41,8 @@ async def lifespan(_: FastAPI):
              config.SPARK_MODEL, config.SAM_MODEL, config.ASR_MODEL)
     if not config.MODEL_API_KEY:
         log.warning("MODEL_API_KEY is empty - API calls will fail. Create .env.")
+    config.supervisor_token()      # create it now, so the supervisor can find it
+    log.info("Supervisor token: SUPERVISOR_TOKEN in .env, else data/supervisor_token.txt")
     yield
 
 
@@ -122,9 +125,21 @@ def api_improve_latest(pid: str) -> dict[str, Any]:
     return {"proposal": db.latest_proposal(pid), "history": db.procedure_history(pid)}
 
 
+_improve_gate = live._RateGate(6, 600.0)      # each request is a paid Spark call
+
+
+def _require_supervisor(token: str | None) -> None:
+    """Changing a procedure needs the supervisor token, not just the link."""
+    if not token or not hmac.compare_digest(token.encode(), config.supervisor_token().encode()):
+        raise HTTPException(401, "Supervisor token required")
+
+
 @app.post("/api/procedures/{pid}/improve")
-def api_improve(pid: str) -> dict[str, Any]:
+def api_improve(pid: str, x_supervisor_token: str | None = Header(default=None)) -> dict[str, Any]:
     """Self-improving procedures: Spark reads the runs and proposes edits."""
+    _require_supervisor(x_supervisor_token)
+    if not _improve_gate.allow():
+        raise HTTPException(429, "Too many requests. Try again in a few minutes.")
     try:
         return improve.propose(pid)
     except KeyError:
@@ -134,8 +149,10 @@ def api_improve(pid: str) -> dict[str, Any]:
 
 
 @app.post("/api/procedures/{pid}/proposals/{prid}/apply")
-def api_apply(pid: str, prid: str, payload: dict[str, Any]) -> dict[str, Any]:
+def api_apply(pid: str, prid: str, payload: dict[str, Any],
+              x_supervisor_token: str | None = Header(default=None)) -> dict[str, Any]:
     """Supervisor approval: apply the accepted suggestions as a new version."""
+    _require_supervisor(x_supervisor_token)
     accept = payload.get("accept") or []
     if not isinstance(accept, list) or not all(isinstance(i, int) for i in accept):
         raise HTTPException(422, "accept must be a list of suggestion numbers")

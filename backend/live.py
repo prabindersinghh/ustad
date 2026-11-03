@@ -882,14 +882,22 @@ def _mmss(seconds: float) -> str:
 # take is kept here by id while the phone keeps recording offline, and a new
 # socket rejoins it (see CaptureSocket). Takes left alone this long are freed.
 TAKE_TTL_S = 20 * 60
+MAX_TAKES = 12                              # takes held in memory at once
+MAX_KEYFRAMES = 400                         # per take
+MAX_GAP_BYTES = 16000 * 2 * 600             # 10 min of offline narration per take
 _TAKES: dict[str, "CaptureSession"] = {}
 
 
 def _prune_takes() -> None:
+    """Free takes left alone past the TTL; past MAX_TAKES, free the
+    longest-detached ones first. A take with a live socket is never freed."""
     now = time.monotonic()
     for cid, take in list(_TAKES.items()):
         if take.detached_at and now - take.detached_at > TAKE_TTL_S:
             _TAKES.pop(cid, None)
+    detached = sorted((t.detached_at, cid) for cid, t in _TAKES.items() if t.detached_at)
+    while len(_TAKES) >= MAX_TAKES and detached:
+        _TAKES.pop(detached.pop(0)[1], None)
 
 
 class CaptureSocket:
@@ -919,6 +927,9 @@ class CaptureSocket:
             return True
         if self.take is None:
             _prune_takes()
+            if len(_TAKES) >= MAX_TAKES:
+                await self.out.send({"type": "error", "message": "The server is busy with other recordings. Try again shortly."})
+                return False
             self.take = CaptureSession(self.out)
             _TAKES[self.take.capture_id] = self.take
         return await self.take.on_text(msg)
@@ -1039,6 +1050,8 @@ class CaptureSession:
                 return True                       # nothing is captured while paused
             # Frames buffered on the phone while offline carry the job-clock
             # time they were taken at; live ones are stamped on arrival.
+            if len(self.keyframes) >= MAX_KEYFRAMES:
+                return True                       # 10 min at one every 2 s, plus offline slack
             at = self.elapsed()
             if isinstance(msg.get("at"), (int, float)):
                 lo = self.frame_times[-1] if self.frame_times else 0.0
@@ -1047,12 +1060,17 @@ class CaptureSession:
             self.frame_times.append(at)
             await self.out.send({"type": "frame_ack", "count": len(self.keyframes)})
         elif kind == "audio_gap":                 # narration recorded while offline
+            data = msg.get("data") or ""
+            room = MAX_GAP_BYTES - sum(len(p) for _, p in self.gaps)
+            # Bounded before decoding: at most the 10 minutes the phone keeps.
+            if not isinstance(data, str) or room <= 0 or len(data) > (room * 4) // 3 + 4:
+                return True
             try:
-                pcm = base64.b64decode(msg.get("data") or "")
+                pcm = base64.b64decode(data)
             except (ValueError, TypeError):
                 pcm = b""
             if pcm and isinstance(msg.get("at"), (int, float)) and len(self.gaps) < 64:
-                self.gaps.append((float(msg["at"]), pcm[: 16000 * 2 * 600]))
+                self.gaps.append((float(msg["at"]), pcm[:room]))
         elif kind == "audio":                 # whole-recording upload (fallback path)
             self.audio_blobs.append(base64.b64decode(msg["data"]))
             self.audio_mime = msg.get("mime", self.audio_mime)

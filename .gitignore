@@ -7,3 +7,4 @@ data/media/
 venv/
 .DS_Store
 .playwright-mcp/
+data/supervisor_token.txt

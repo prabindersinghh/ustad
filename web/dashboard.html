@@ -261,16 +261,34 @@ function improveBox(id, data, runs){
     <span id="improve-msg" class="muted"></span></div>${histLine}</div>`;
 }
 
+/* Changing a procedure needs the supervisor token (in .env, or the server's
+ * data/supervisor_token.txt). Asked for once, kept in this browser. */
+function supToken(reset){
+  let t = null;
+  try { t = reset ? null : localStorage.getItem('ustad-sup'); } catch(_) {}
+  if(!t){
+    t = (prompt('Supervisor token (SUPERVISOR_TOKEN in .env, or data/supervisor_token.txt on the server):')||'').trim();
+    try { if(t) localStorage.setItem('ustad-sup', t); } catch(_) {}
+  }
+  return t;
+}
+async function supFetch(url, opts={}){
+  const go = (t) => fetch(url, {...opts, headers:{...(opts.headers||{}), 'X-Supervisor-Token': t||''}});
+  let r = await go(supToken());
+  if(r.status===401) r = await go(supToken(true));
+  return r;
+}
+
 async function askImprove(id, btn){
   btn.disabled = true; $('improve-msg').textContent = 'Muse Spark is reading the runs…';
-  const r = await fetch(`/api/procedures/${id}/improve`, {method:'POST'});
+  const r = await supFetch(`/api/procedures/${id}/improve`, {method:'POST'});
   if(!r.ok){ const e = await r.json().catch(()=>({})); $('improve-msg').textContent = e.detail || 'Could not get suggestions.'; btn.disabled=false; return; }
   showProcedure(id);
 }
 
 async function applyImprove(id, prid, dismiss){
   const accept = dismiss ? [] : [...document.querySelectorAll('#improve input[type=checkbox]:checked')].map(x=>+x.dataset.i);
-  const r = await fetch(`/api/procedures/${id}/proposals/${prid}/apply`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({accept})});
+  const r = await supFetch(`/api/procedures/${id}/proposals/${prid}/apply`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({accept})});
   const out = await r.json().catch(()=>({}));
   if(!r.ok){ $('improve-msg').textContent = out.detail || 'Could not apply.'; return; }
   showProcedure(id);

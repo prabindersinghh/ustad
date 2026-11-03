@@ -44,7 +44,7 @@ lands here in the same commit.
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
 | `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal). |
-| `tests/` | 109 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
+| `tests/` | 112 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
 
@@ -217,8 +217,8 @@ chunks.
 | `GET /api/procedures` · `/api/procedures/{id}` | The library, one procedure. |
 | `GET /api/procedures/{id}/insights` | Per-step first-time-right rate, caught, inferred, skipped, questions, median time. |
 | `GET /api/procedures/{id}/improve` | The latest proposal and the version history. |
-| `POST /api/procedures/{id}/improve` | Ask Spark for improvements (409 with no runs). |
-| `POST /api/procedures/{id}/proposals/{prid}/apply {accept: [i]}` | Apply the approved items as a new version (409 if stale or handled). |
+| `POST /api/procedures/{id}/improve` | Ask Spark for improvements. Supervisor token; 409 with no runs; 429 past 6 per 10 min. |
+| `POST /api/procedures/{id}/proposals/{prid}/apply {accept: [i]}` | Apply the approved items as a new version. Supervisor token; 409 if stale or handled. |
 | `GET /api/sessions` · `/api/sessions/{id}` | Session list, one session with events (with `detections`). |
 | `GET /api/sessions/{id}/pack` | Evidence pack data: session, the procedure as it was when the job ran, events. |
 | `GET /evidence?s=<id>` | The printable evidence pack page. |
@@ -275,6 +275,7 @@ a cent.
 | `JUDGE_REFERENCE` | 1 | Show the judge the expert's photo of the step. |
 | `ASK_EFFORT` · `COACH_AFTER_FAILS` | minimal · 2 | Ask Ustad reasoning effort; fails before coaching. |
 | `IMPROVE_EFFORT` | medium | Self-improving procedures. |
+| `SUPERVISOR_TOKEN` | (secret; else generated into `data/supervisor_token.txt`) | Required as `X-Supervisor-Token` by `POST .../improve` and `.../apply`. |
 | `BUDGET_USD` | 50 | Live watching switches off at 95%. |
 | `VALIDATE_PROCEDURE` | 1 | Run the capture self-check. |
 | `VOICE` | 1 | Realtime voice. |

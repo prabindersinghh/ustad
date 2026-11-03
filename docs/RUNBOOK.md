@@ -49,7 +49,7 @@ On the iPhone:
 ## Test
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 109 tests, no network, no cost
+.venv/Scripts/python.exe -m pytest -q          # 112 tests, no network, no cost
 ```
 
 These hit the real APIs and **cost money** (cents):
@@ -105,7 +105,10 @@ Script errors from phones appear as `client error: <message> | <user agent>`.
 - **Evidence pack:** the report screen's button, or the dashboard session's
   "evidence pack" link.
 - **Improve:** dashboard, pick a procedure with runs, "Suggest
-  improvements" (one Spark call plus SAM checks, about a cent).
+  improvements" (one Spark call plus SAM checks, about a cent). The
+  dashboard asks once for the **supervisor token**: `SUPERVISOR_TOKEN` in
+  `.env`, or else the contents of `data/supervisor_token.txt` (created on
+  first start, gitignored). Don't paste it anywhere public.
 
 ## Troubleshooting
 
