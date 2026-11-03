@@ -114,13 +114,22 @@ def supervisor_token() -> str:
     path = ROOT / "data" / "supervisor_token.txt"
     try:
         tok = path.read_text(encoding="utf-8").strip()
+        if tok and os.name == "posix" and path.stat().st_mode & 0o077:
+            os.chmod(path, 0o600)                 # an older or copied file: owner-only
     except OSError:
         tok = ""
     if not tok:
         import secrets
         tok = secrets.token_urlsafe(18)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(tok, encoding="utf-8")
+        # Created owner-only (0600) in one step: never readable by others,
+        # not even for a moment. Two starts racing: the second reads the first.
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            return path.read_text(encoding="utf-8").strip() or tok
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(tok)
     return tok
 
 # --------------------------------------------------------------------------
