@@ -886,6 +886,9 @@ TAKE_TTL_S = 20 * 60
 MAX_TAKES = 12                              # takes held in memory at once
 MAX_TAKES_PER_CLIENT = 4                    # per client address (a factory NAT shares one)
 MAX_KEYFRAMES = 4000                        # per take: 2 h at one every 2 s (frames live on disk)
+MAX_FRAME_B64 = 700_000                     # one encoded frame (~520 KB); the phone sends ~100-200 KB
+MAX_TAKE_BYTES = 300 * 1024 * 1024          # frames on disk per take
+MAX_TOTAL_BYTES = 1536 * 1024 * 1024        # frames on disk across all takes
 PCM_CAP = 16000 * 2 * 1200                  # fallback narration audio kept per take: 20 min
 MAX_GAP_BYTES = 16000 * 2 * 600             # 10 min of offline narration per take
 _TAKES: dict[str, "CaptureSession"] = {}
@@ -910,12 +913,13 @@ class FrameStore:
     in memory, and only the few the writer needs are ever read back."""
 
     def __init__(self, folder: Path) -> None:
-        self.dir, self.n = folder, 0
+        self.dir, self.n, self.bytes = folder, 0, 0
 
     def append(self, jpeg: bytes) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         (self.dir / f"{self.n:05d}.jpg").write_bytes(jpeg)
         self.n += 1
+        self.bytes += len(jpeg)
 
     def __len__(self) -> int:
         return self.n
@@ -933,6 +937,7 @@ class FrameStore:
     def remove(self) -> None:
         import shutil
         shutil.rmtree(self.dir, ignore_errors=True)
+        self.bytes = 0                            # off disk: no longer counts against the budget
 
 
 TAKE_TTL_EMPTY_S = 120                      # a detached take with almost nothing in it
@@ -1141,11 +1146,28 @@ class CaptureSession:
             # time they were taken at; live ones are stamped on arrival.
             if len(self.keyframes) >= MAX_KEYFRAMES:
                 return True
+            # Disk is bounded too: a frame's size is checked before decoding,
+            # it must be a JPEG, and each take and all takes have a byte budget.
+            data = msg.get("data")
+            if not isinstance(data, str) or len(data) > MAX_FRAME_B64:
+                return True
+            try:
+                jpeg = decode_frame(data)
+            except (ValueError, TypeError):
+                return True
+            if not jpeg.startswith(b"\xff\xd8"):
+                return True
+            if (self.keyframes.bytes + len(jpeg) > MAX_TAKE_BYTES
+                    or sum(t.keyframes.bytes for t in _TAKES.values()) + len(jpeg) > MAX_TOTAL_BYTES):
+                if not getattr(self, "_full_said", False):
+                    self._full_said = True
+                    log.warning("capture %s: frame budget reached at %d frames", self.capture_id, len(self.keyframes))
+                return True
             at = self.elapsed()
             if isinstance(msg.get("at"), (int, float)):
                 lo = self.frame_times[-1] if self.frame_times else 0.0
                 at = min(max(float(msg["at"]), lo), max(at, lo))
-            self.keyframes.append(decode_frame(msg["data"]))
+            await asyncio.to_thread(self.keyframes.append, jpeg)
             self.frame_times.append(at)
             await self.out.send({"type": "frame_ack", "count": len(self.keyframes)})
             self._maybe_cut(quiet=True)

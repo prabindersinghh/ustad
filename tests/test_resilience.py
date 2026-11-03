@@ -201,6 +201,22 @@ def test_a_long_take_is_written_in_parts_while_recording_then_merged(cap, monkey
     assert not folder.exists()                                      # frames freed once saved
 
 
+def test_frames_on_disk_are_bounded(cap, monkeypatch):
+    client, built, db = cap
+    with client.websocket_connect("/ws/capture") as ws:
+        ws.send_json({"type": "start"})
+        cid = _until(ws, "capture")["capture_id"]
+        ws.send_json({"type": "frame", "data": "A" * (live.MAX_FRAME_B64 + 4)})        # too big: refused unread
+        ws.send_json({"type": "frame", "data": base64.b64encode(b"GIF89a....").decode()})  # not a JPEG
+        ws.send_json({"type": "frame", "data": FRAME})
+        assert _until(ws, "frame_ack")["count"] == 1
+        monkeypatch.setattr(live, "MAX_TAKE_BYTES", live._TAKES[cid].keyframes.bytes)   # budget now full
+        ws.send_json({"type": "frame", "data": FRAME})
+        ws.send_json({"type": "ping"})
+        _until(ws, "pong")
+        assert len(live._TAKES[cid].keyframes) == 1
+
+
 def test_frame_store_reads_back_what_it_wrote(tmp_path):
     fs = live.FrameStore(tmp_path / "t")
     for b in (b"a", b"b", b"c"):

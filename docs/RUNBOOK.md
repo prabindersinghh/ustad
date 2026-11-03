@@ -49,7 +49,7 @@ On the iPhone:
 ## Test
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 119 tests, no network, no cost
+.venv/Scripts/python.exe -m pytest -q          # 120 tests, no network, no cost
 ```
 
 These hit the real APIs and **cost money** (cents):
