@@ -48,6 +48,12 @@ def store_secret() -> None:
     print("secret ustad-env stored with", sorted(values))
 
 
+def db_session_tables(conn: sqlite3.Connection) -> list[str]:
+    """Every table with a session_id column, including ones added later."""
+    names = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    return [n for n in names if any(c[1] == "session_id" for c in conn.execute(f"PRAGMA table_info({n})"))]
+
+
 def seed() -> None:
     src = sqlite3.connect(ROOT / "data" / "ustad.db")
     tmp = Path(tempfile.mkdtemp()) / "ustad.db"
@@ -65,6 +71,9 @@ def seed() -> None:
     ph = ",".join("?" * len(photo_ids))
     dst.execute(f"DELETE FROM sessions WHERE procedure_id NOT IN ({ph})", photo_ids)
     dst.execute("DELETE FROM step_events WHERE session_id NOT IN (SELECT id FROM sessions)")
+    # Everything else keyed by session goes with it, so no removed job travels up.
+    for table in db_session_tables(dst):
+        dst.execute(f"DELETE FROM {table} WHERE session_id NOT IN (SELECT id FROM sessions)")
     dst.commit()
     text = " ".join(r[0] for r in dst.execute("SELECT steps_json FROM procedures"))
     text += " " + " ".join(str(r[0]) for r in dst.execute("SELECT evidence_path FROM step_events WHERE evidence_path IS NOT NULL"))

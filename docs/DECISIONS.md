@@ -62,3 +62,4 @@ is reversed, mark it **Superseded by D-0xx**.
 | D-054 | 11-04 | **A second opinion never falls back to another model, and doesn't change the job's record** | The result names the model that judged, so a failed call must say so. It is a separate table: the original verdict stays what the worker was told. |
 | D-055 | 11-04 | **It needs the supervisor token and warns before sending photos to NVIDIA** | NVIDIA's trial API asks for no confidential data or faces, and the link is public. Factory footage stays off it unless a person chooses otherwise. |
 | D-032 | 11-03 | **Metrics count only judged checks** | Questions, skips and notices are events, not checks; counting them skewed the pass rate. |
+| D-SITE-1 | 11-04 | **A second opinion sends only the job's photos, never the expert's reference photo** | The supervisor agreed to send what the page shows. It also matches how Glimmer was measured. Live judging keeps the reference photo. |

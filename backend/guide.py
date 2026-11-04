@@ -339,7 +339,9 @@ def judge_step(
     )
     # The expert's own photo of this step, shown first: few-shot recognition
     # of the right part on this exact machine, at one extra image per check.
-    ref = reference_photo(step) if config.JUDGE_REFERENCE else None
+    # Not on the open-weights second opinion: it goes to an outside API, and the
+    # supervisor agreed to send only the job photos the page shows.
+    ref = reference_photo(step) if config.JUDGE_REFERENCE and not open_weights else None
     images = ([meta_client.as_image_part(ref)] if ref else []) + [meta_client.as_image_part(frame)]
     where = ("The first image is the reference photo from the expert's recording of this step. "
              "The second image is the worker's current view." if ref

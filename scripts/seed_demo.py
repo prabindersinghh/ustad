@@ -150,8 +150,9 @@ def reset() -> None:
     db.init()
     with db.connect() as conn:
         conn.execute("DELETE FROM step_events")
+        conn.execute("DELETE FROM second_opinions")
         conn.execute("DELETE FROM sessions")
-    print("Cleared sessions and step events. Procedures kept.")
+    print("Cleared sessions, step events and second opinions. Procedures kept.")
 
 
 def main() -> int:
