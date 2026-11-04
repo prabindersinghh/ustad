@@ -490,3 +490,25 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .signin-error { min-height: 22px; margin: 8px 0; font-size: 14px; font-weight: 500; color: var(--bad); }
 .signin-go { width: 100%; height: 50px; border: 0; border-radius: 10px; background: var(--blue); color: #fff; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
 .signin-close { position: absolute; top: 12px; right: 12px; width: 44px; height: 44px; border: 0; background: none; color: var(--muted); font-size: 26px; cursor: pointer; }
+
+/* hero: labels as cards around the glasses, so nothing crosses the model as it turns */
+.hs-label { display: none; }
+.hero-note { position: relative; z-index: 4; display: flex; align-items: flex-start; gap: 12px; padding: 16px; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-sm); }
+.hero-note b { display: block; font-size: 15px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; color: var(--ink); }
+.hero-note i { display: block; margin-top: 3px; font-style: normal; font-size: 13px; line-height: 1.3; color: var(--muted); }
+.hn-ic { flex: none; display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 11px; background: linear-gradient(150deg, #5c86f5, var(--blue)); box-shadow: 0 6px 14px rgba(26,86,224,.3); }
+.hn-ic svg { width: 21px; height: 21px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 1179px) {
+  .hero-visual { height: auto; display: grid; gap: 12px; grid-template-columns: 1fr; max-width: 640px; }
+  .hero-visual model-viewer { height: 300px; }
+  .verdict-card { position: relative; right: auto; bottom: auto; margin: 0; width: 100%; max-width: none; }
+}
+@media (min-width: 1180px) {
+  .hero-visual { max-width: 1160px; }
+  .hero-visual model-viewer { width: 860px; margin: 0 auto; display: block; }
+  .hero-note { position: absolute; width: 300px; box-shadow: var(--shadow); }
+  .hero-note.tl { left: 0; top: 7%; }
+  .hero-note.bl { left: 0; bottom: 7%; }
+  .hero-note.tr { right: 0; top: 7%; }
+  .verdict-card { bottom: 7%; width: 300px; }
+}
