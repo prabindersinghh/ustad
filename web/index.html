@@ -302,16 +302,17 @@
 
         <div class="privacy">
           <div>
-            <h2 class="sec-h">Your line footage can stay inside your plant</h2>
+            <h2 class="sec-h">Built so line footage can stay inside your plant</h2>
             <p class="body">Plant managers ask one question before any other: does video of our line leave
-              the site? Ustad can run its step checks on Meta's open-weight models on a single GPU in your
-              plant, and every checked step records which engine judged it. Where your footage went is in the
-              log, not in a promise.</p>
+              the site? Ustad's step checks already run on Muse Glimmer, Meta's open-weight model: on our 8 test
+              cases it gave the same verdicts as Muse Spark, with no false passes. Through a hosted API it took
+              about a minute a check, so today it gives a second opinion after the job. The same code can point
+              at a GPU in your plant, which we have not tested yet.</p>
           </div>
           <div class="tiers">
             <article class="tier"><h3>Hosted</h3><p>Meta Model API. Fastest to stand up.</p></article>
-            <article class="tier"><h3>Partner-served</h3><p>Muse Spark Open on managed inference. Full quality, no hardware.</p></article>
-            <article class="tier on"><h3>On-premise</h3><p>Muse Glimmer on one GPU inside the plant. Nothing leaves.</p></article>
+            <article class="tier"><h3>Second opinion</h3><p>Muse Glimmer through a partner API, after the job. Working today.</p></article>
+            <article class="tier"><h3>On-premise</h3><p>Muse Glimmer on one GPU inside the plant. Planned, not tested yet.</p></article>
           </div>
         </div>
       </div>

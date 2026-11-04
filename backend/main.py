@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, improve, live, meta_client
+from . import config, db, improve, live, meta_client, second_opinion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -173,18 +173,40 @@ def api_pack(sid: str) -> dict[str, Any]:
     if not record["session"]:
         raise HTTPException(404, "No such session")
     proc = db.get_procedure(record["session"]["procedure_id"]) or {"title": "(deleted procedure)", "steps": []}
-    steps = proc.get("steps", [])
+    steps = second_opinion.steps_as_ran(record["session"], proc)
     ran = record["session"].get("procedure_version")
-    if ran and proc.get("version") and int(ran) != int(proc["version"]):
-        hist = db.procedure_history_steps(proc["id"], int(ran))
-        if hist:
-            steps = hist[0]
     return {
         **record,
         "procedure": {"id": proc.get("id"), "title": proc["title"], "machine": proc.get("machine"),
                       "version": ran or proc.get("version") or 1, "steps": steps},
         "models": {"reasoning": config.SPARK_MODEL, "perception": config.SAM_MODEL},
     }
+
+
+_second_opinion_gate = live._RateGate(3, 600.0)   # each run uses a rate-limited free API
+
+
+@app.get("/api/sessions/{sid}/second-opinion")
+def api_second_opinion(sid: str) -> dict[str, Any]:
+    """What Muse Glimmer said about this job, if asked."""
+    return second_opinion.status(sid)
+
+
+@app.post("/api/sessions/{sid}/second-opinion")
+def api_second_opinion_start(sid: str, x_supervisor_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """Re-check a finished job's photos on Muse Glimmer, in the background.
+    Needs the token because it sends the job's photos to a third party."""
+    _require_supervisor(x_supervisor_token)
+    if not config.open_backend_ready():
+        raise HTTPException(409, "No open-weights model is configured.")
+    if not _second_opinion_gate.allow():
+        raise HTTPException(429, "Too many requests. Try again in a few minutes.")
+    try:
+        return {"started": True, "steps": second_opinion.start(sid), "model": config.OPEN_MODEL}
+    except KeyError:
+        raise HTTPException(404, "No such session") from None
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from None
 
 
 _clientlog_gate = live._RateGate(30, 60.0)   # unauthenticated: bound it

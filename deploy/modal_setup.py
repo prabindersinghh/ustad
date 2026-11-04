@@ -34,13 +34,17 @@ def env_values() -> dict[str, str]:
 def store_secret() -> None:
     values = env_values()
     # Local paths mean nothing in the container. The open backend stays off.
-    for local_only in ("FFMPEG", "DB_PATH", "REASONING_BACKEND"):
+    # Keys for other routes aren't needed up there: only what the app uses goes.
+    for local_only in ("FFMPEG", "DB_PATH", "REASONING_BACKEND", "AI_GATEWAY_API_KEY", "MODAL_PROXY_TOKEN"):
         values.pop(local_only, None)
     if "SUPERVISOR_TOKEN" not in values:
         token = (ROOT / "data" / "supervisor_token.txt")
         if token.exists():
             values["SUPERVISOR_TOKEN"] = token.read_text(encoding="utf-8").strip()
-    modal.Secret.objects.create("ustad-env", values, allow_existing=True)
+    # Creating over an existing secret keeps the old values, so replace it.
+    # A running app keeps its copy until the next `modal deploy`.
+    modal.Secret.objects.delete("ustad-env", allow_missing=True)
+    modal.Secret.objects.create("ustad-env", values)
     print("secret ustad-env stored with", sorted(values))
 
 

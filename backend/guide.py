@@ -304,6 +304,7 @@ def judge_step(
     context: str = "",
     lang: str = "en",
     spoken_spec: str | None = None,
+    open_weights: bool = False,
 ) -> dict[str, Any]:
     """Perception + decision for one step, with NO persistence.
 
@@ -372,6 +373,7 @@ def judge_step(
         effort=effort or config.JUDGE_EFFORT,
         max_output_tokens=config.JUDGE_MAX_OUTPUT_TOKENS,
         cache_key="ustad-judge" if lang == "en" else f"ustad-judge-{lang}",
+        **({"force_open": True} if open_weights else {}),
     )
     backend = getattr(resp, "backend", backend)  # may have fallen back
     calls = meta_client.tool_calls(resp)

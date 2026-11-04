@@ -40,7 +40,7 @@ def client() -> OpenAI:
 
 
 def open_client() -> OpenAI:
-    """Self-deployed open-weights endpoint (Modal / Baseten / on-prem box).
+    """Open-weights endpoint (NVIDIA's API, Modal, Baseten, an on-prem box).
 
     Modal proxy tokens are used as `wk-<id>.ws-<secret>`; Baseten uses its own
     key. Either way it is an OpenAI-compatible base URL, so nothing else in
@@ -163,11 +163,15 @@ def reason(
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
     force_hosted: bool = False,
+    force_open: bool = False,
     effort: str | None = None,
     max_output_tokens: int | None = None,
     cache_key: str | None = None,
 ) -> Any:
     """One reasoning turn, on whichever backend is active.
+
+    `force_open` pins a call to the open-weights model with no fallback: a
+    failure raises, so a record naming that model is never another model's word.
 
     `force_hosted` pins a call to the Meta Model API regardless of config --
     used where a capability only the hosted models have is required.
@@ -179,6 +183,8 @@ def reason(
     reasoning tokens so one check can never run away. `cache_key` groups calls
     that share a long fixed prefix (system prompt + tools) for prompt caching.
     """
+    if force_open:
+        return _reason_open(instructions, content, tools=tools)
     if not force_hosted and active_backend() == "open":
         try:
             return _reason_open(instructions, content, tools=tools)

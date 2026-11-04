@@ -79,19 +79,30 @@ After two failed checks, Ustad coaches without being asked. The judge itself als
 | **Live view at about 1 fps, sent only when it changes** | Capture samples a keyframe every 2 s. Guide sends a small frame about once a second, and only when the view changed; otherwise a tiny heartbeat. Grounding runs continuously, so a step can verify itself without the worker saying *done*. |
 | **Tool calling, not free-text verdicts** | A constrained tool call is auditable and executable. It is also what makes this a genuine agentic loop rather than a prompt that returns an opinion. |
 | **No model audio fallback** | Spark 1.3 does not take audio, so the only fallback is batch ASR. A failure is reported, never papered over. |
-| **Pluggable reasoning backend** | The verification loop runs on the hosted Meta Model API *or* on Muse Glimmer deployed on our own infrastructure, switched by one env var. Both speak the OpenAI protocol, so the swap is a base URL. |
+| **Pluggable reasoning backend** | The verification loop runs on the hosted Meta Model API *or* on Muse Glimmer, switched by one env var. Both speak the OpenAI protocol, so the swap is a base URL. |
 
 ### Running on open weights
 
 A factory's first question is not about accuracy. It is whether footage of their line leaves the site.
 
-Ustad answers it by running the verification reasoning on **Muse Glimmer 30B**, a Meta open-weight model, deployed on infrastructure the operator controls — Modal for this build, equally a box in the plant room. Muse Glimmer is the right target: it is built for agentic tool calling, which is exactly what the verification loop does, and it fits a modest GPU budget where Muse Spark Open (816B MoE) does not.
+The verification reasoning already runs on **Muse Glimmer 30B**, Meta's open-weight model, through the same judge code as the live product. Measured on 8 cases, 4 of them deliberately wrong photos:
 
-```bash
-bash scripts/deploy_open_model.sh     # creates the endpoint, prints the env vars
+| | Right | False passes | Median per check |
+|---|---|---|---|
+| Muse Spark 1.3 (hosted) | 8/8 | 0 | 4.6 s |
+| Muse Glimmer 30B (NVIDIA's free API) | 8/8 | 0 | 63 s |
+
+A worker can't wait a minute per step, so today Glimmer gives a **second opinion after the job**: press the button on an evidence pack, and each step's photo is judged again, with the model id recorded next to the first verdict. A failed call is recorded as a failure, never answered by another model.
+
+To try it, set these in `.env` (a key from build.nvidia.com):
+
+```
+OPEN_BASE_URL=https://integrate.api.nvidia.com/v1
+OPEN_MODEL=meta/muse-glimmer-30b
+OPEN_API_KEY=...
 ```
 
-Then set `REASONING_BACKEND=open` and restart. `/api/health` reports which engine is live, and **every step event is tagged with the backend that judged it**, so `/api/metrics` returns a `checks_by_backend` breakdown — hard evidence of which model actually did the work rather than a claim in a slide.
+The same switch moves live guiding too: `REASONING_BACKEND=open`, then `/api/health` reports the engine and `/api/metrics` a `checks_by_backend` breakdown. Pointing it at a GPU in the plant (`scripts/deploy_open_model.sh` deploys on Modal) is the design for keeping footage on site. **That part is not tested yet.**
 
 SAM 3.1 and Muse Voice Transcribe stay on the hosted API; neither has an open-weights release. `OPEN_FALLBACK=1` means a cold-starting endpoint degrades to the hosted model rather than stranding a worker mid-procedure, and the log records honestly which backend handled each step.
 

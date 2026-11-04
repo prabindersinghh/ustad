@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-04 IST · **Tests:** 175 passing
+**Last updated:** 2026-11-04 IST · **Tests:** 186 passing
 **Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $5.17 of the $50 working cap
 
 ## In one paragraph
@@ -30,6 +30,7 @@ approval makes a new version.
 
 | Capability | Evidence |
 |---|---|
+| Muse Glimmer second opinion on a finished job: same judge, model id recorded, can't affect live guiding | 8 cases 2026-11-04: Glimmer 8/8 at 63 s median, Muse Spark 8/8 at 4.6 s, no false passes. Real run through the public link. 11 tests |
 | Permanent public link, no laptop needed: https://prabindersinghh--ustad-web.us-east.modal.run | Public address 2026-11-04: real job, browser job, data survives a redeploy. Not yet tried on an iPhone |
 | Hindi guide: spoken and on-screen steps, verdicts and answers; Hindi voice commands; numbers checked in code | Real models on the user's job 2026-11-04; browser at phone size; 40 tests |
 | Guiding is fast: about 7 s per step from the finished state to the next instruction (was 11.5 to 30 s), on the user's real job; instant answer to "what do I do" | Real models 2026-11-04 01:30, same photos old vs new; tests |
@@ -61,8 +62,11 @@ approval makes a new version.
 - **Hindi on a real phone with a real voice.** Speech was tested on synthetic
   Hindi audio, on-device speech in a desktop browser. Not yet: an iPhone's
   Hindi voice, a real worker's accent, factory noise.
-- **Muse Glimmer.** Never run. Modal refuses any GPU without a card, which the
-  user doesn't have; the landing page's on-premise tier is a design, not a tested setup.
+- **Muse Glimmer on hardware we control.** It has only run through NVIDIA's API.
+  Modal refuses any GPU without a card, despite the user's $100.99 credit. The
+  on-premise tier is labelled "planned" on the landing page.
+- **Whether a partner API qualifies for the open-weight prize.** Official rules
+  not found online; the user should check.
 
 ## Known issues
 
@@ -80,5 +84,5 @@ approval makes a new version.
 
 1. User: factory demo and video; share the factory media for the landing page.
 2. iPhone run on the Modal link.
-3. Glimmer: no card, so a per-token host needs the user's account and key.
+3. Show the second opinion in the demo video; only on footage without faces.
 4. Remove test procedures just before submitting · **make the repo public**.

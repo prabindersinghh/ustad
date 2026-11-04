@@ -73,6 +73,22 @@ CREATE TABLE IF NOT EXISTS proposals (
     created_at   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS second_opinions (
+    session_id    TEXT NOT NULL,
+    event_id      TEXT NOT NULL,
+    step_index    INTEGER NOT NULL,
+    model         TEXT NOT NULL,
+    first_verdict TEXT,
+    verdict       TEXT,
+    agrees        INTEGER,
+    confidence    REAL,
+    reason        TEXT,
+    latency_ms    INTEGER,
+    error         TEXT,
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (session_id, event_id, model)
+);
+
 CREATE TABLE IF NOT EXISTS translations (
     procedure_id TEXT NOT NULL,
     version      INTEGER NOT NULL,
@@ -144,6 +160,24 @@ def get_procedure(pid: str) -> dict[str, Any] | None:
     out = dict(row)
     out["steps"] = json.loads(out.pop("steps_json"))
     return out
+
+
+def save_second_opinion(session_id: str, row: dict[str, Any]) -> None:
+    agrees = row.get("agrees")
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO second_opinions (session_id, event_id, step_index, model, first_verdict,"
+            " verdict, agrees, confidence, reason, latency_ms, error, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (session_id, row["event_id"], row["step_index"], row["model"], row.get("first_verdict"), row.get("verdict"),
+             None if agrees is None else int(agrees), row.get("confidence"), row.get("reason"),
+             row.get("latency_ms"), row.get("error"), time.time()))
+
+
+def second_opinions(session_id: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM second_opinions WHERE session_id = ? ORDER BY step_index",
+                            (session_id,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_translation(pid: str, version: int, lang: str) -> dict[str, Any] | None:

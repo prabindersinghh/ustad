@@ -137,6 +137,14 @@ Costs about $0.06 an hour while up. `python deploy/modal_setup.py --seed`
 **overwrites the cloud's data** with the chosen jobs from the laptop: don't run
 it once real runs exist there.
 
+## Muse Glimmer second opinion
+
+Open a job's evidence pack (`/evidence?s=<session>`) and press **Get a second
+opinion**. It needs the supervisor token. Photos go to NVIDIA's API: don't use it
+on footage showing faces or anything confidential. Settings: `OPEN_BASE_URL`,
+`OPEN_API_KEY`, `OPEN_MODEL`, with `REASONING_BACKEND` left on hosted. Live
+guiding on Glimmer (`REASONING_BACKEND=open`) would mean about a minute per check.
+
 ## Deadline checklist
 
 - [x] Test procedures left out of the cloud copy (the laptop's list is unchanged)
