@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import logging
 import struct
 import time
@@ -75,6 +76,9 @@ def log_diag(where: str, session: str | None, msg: dict[str, Any]) -> None:
     if isinstance(notes, list):
         fields["notes"] = [clean_for_log(n, 100) for n in notes[:8]]
     log.info("diag %s %s %s", where, clean_for_log(session or "-", 20), fields)
+
+
+MAX_GATES = 2000
 
 
 class _RateGate:
@@ -1067,8 +1071,36 @@ def client_address(conn) -> str:
     if config.TRUST_CF_CONNECTING_IP and host in ("127.0.0.1", "::1"):
         ip = conn.headers.get("cf-connecting-ip") if hasattr(conn, "headers") else None
         if ip:
-            return ip
-    return host
+            host = ip
+    return _bucket(host)
+
+
+def _bucket(host: str) -> str:
+    """A limit key. An IPv6 client owns a whole /64, so it counts as one client.
+    Anything that isn't an address is one shared bucket, not a free pass."""
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return "?" if host != "testclient" else host
+    if addr.version == 6 and not addr.is_loopback:
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
+
+
+_OVERFLOW = "__overflow__"
+
+
+def gate_for(gates: dict[str, _RateGate], client: str, n: int, per: float) -> _RateGate:
+    """One client's limiter. A full table drops idle entries. If every entry is
+    active, newcomers share one bucket: live limits are never evicted, so flooding
+    the table can't reset anyone's limit or buy anyone a fresh one."""
+    if client not in gates and len(gates) >= MAX_GATES:
+        now = time.monotonic()
+        for key in [k for k, g in gates.items() if k != _OVERFLOW and not any(now - t < g.per for t in g.times)]:
+            del gates[key]
+        if len(gates) >= MAX_GATES:
+            client = _OVERFLOW
+    return gates.setdefault(client, _RateGate(n, per))
 
 
 def _admit_take(owner: str) -> bool:
@@ -1080,9 +1112,7 @@ def _admit_take(owner: str) -> bool:
     give way. When full, new takes are refused (a busy server, not lost work).
     """
     now = time.monotonic()
-    if len(_take_gates) > 2000:
-        _take_gates.clear()                      # bounded; a reset only loosens limits briefly
-    gate = _take_gates.setdefault(owner, _RateGate(6, 600.0))
+    gate = gate_for(_take_gates, owner, 6, 600.0)
     if not gate.allow():
         return False
     for cid, take in list(_TAKES.items()):

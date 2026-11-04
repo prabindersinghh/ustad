@@ -86,18 +86,7 @@ async def _access_gate(request: Request, call_next):
 
 
 _login_gates: dict[str, live._RateGate] = {}
-
-
-def _gate_for(gates: dict[str, live._RateGate], client: str, n: int, per: float) -> live._RateGate:
-    """One client's limiter. A full table drops idle entries, then the oldest:
-    never everyone's, so flooding it can't reset other clients' limits."""
-    if client not in gates and len(gates) >= 2000:
-        now = time.monotonic()
-        for key in [k for k, g in gates.items() if not any(now - t < g.per for t in g.times)]:
-            del gates[key]
-        while len(gates) >= 2000:
-            del gates[next(iter(gates))]
-    return gates.setdefault(client, live._RateGate(n, per))
+_login_failures = live._RateGate(300, 600.0)   # all clients together, against distributed guessing
 
 
 @app.get("/api/me")
@@ -111,11 +100,14 @@ def api_login(request: Request, payload: dict[str, Any]) -> JSONResponse:
     if not access.enabled():
         return JSONResponse({"ok": True})
     # Only wrong guesses count, per client: nobody can lock anyone else out.
-    gate = _gate_for(_login_gates, live.client_address(request), 8, 600.0)
-    if gate.full():
+    gate = live.gate_for(_login_gates, live.client_address(request), 8, 600.0)
+    if gate.full() or _login_failures.full():
         raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
     if not access.code_ok(payload.get("code")):
         gate.allow()
+        _login_failures.allow()
+        if _login_failures.full():
+            log.warning("sign-in: many wrong codes from many clients; pausing sign-in for a few minutes")
         raise HTTPException(401, "That code isn't right.")
     response = JSONResponse({"ok": True})
     response.set_cookie(access.COOKIE, access.issue(), max_age=access.TTL_S, httponly=True, samesite="lax",
@@ -350,7 +342,7 @@ def _socket_refusal(ws: WebSocket) -> str | None:
         return "The demo is full right now. Please try again in a few minutes."
     if not config.SOCKETS_PER_CLIENT_PER_HOUR:
         return None
-    gate = _gate_for(_socket_gates, live.client_address(ws), config.SOCKETS_PER_CLIENT_PER_HOUR, 3600.0)
+    gate = live.gate_for(_socket_gates, live.client_address(ws), config.SOCKETS_PER_CLIENT_PER_HOUR, 3600.0)
     if not gate.allow():
         return "Too many sessions from this device. Please try again later."
     return None

@@ -18,6 +18,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "supervisor_token", lambda: "tok")
     monkeypatch.setattr(main, "_login_gates", {})
     monkeypatch.setattr(main, "_socket_gates", {})
+    monkeypatch.setattr(main, "_login_failures", live._RateGate(1000, 600.0))
     db.init()
     access.reset_spend_cache()
     (tmp_path / "photo.jpg").write_bytes(b"\xff\xd8photo")
@@ -84,14 +85,27 @@ def test_only_wrong_guesses_count(client):
     assert client.post("/api/login", json={"code": CODE}).status_code == 429
 
 
-def test_limit_table_never_resets_other_clients(client):
+def test_limit_table_never_evicts_live_limits(client, monkeypatch):
+    monkeypatch.setattr(live, "MAX_GATES", 50)
     gates = {}
-    victim = main._gate_for(gates, "victim", 1, 3600.0)
+    victim = live.gate_for(gates, "victim", 1, 3600.0)
     assert victim.allow()
-    for i in range(3000):
-        main._gate_for(gates, f"flood{i}", 1, 3600.0)
-    assert len(gates) <= 2000
-    assert all(g is not None for g in gates.values())
+    for i in range(200):
+        live.gate_for(gates, f"flood{i}", 1, 3600.0).allow()
+    assert live.gate_for(gates, "victim", 1, 3600.0) is victim and victim.full()
+    assert live.gate_for(gates, "newcomer", 1, 3600.0).full()   # shares the overflow bucket
+
+
+def test_many_clients_guessing_pause_sign_in(client, monkeypatch):
+    monkeypatch.setattr(main, "_login_failures", live._RateGate(2, 600.0))
+    assert client.post("/api/login", json={"code": "x"}).status_code == 401
+    assert client.post("/api/login", json={"code": "y"}).status_code == 401
+    assert client.post("/api/login", json={"code": "z"}).status_code == 429
+
+
+def test_ipv6_clients_count_per_network_and_junk_is_one_bucket(client):
+    assert live._bucket("2001:db8:1:2:3:4:5:6") == live._bucket("2001:db8:1:2:9:9:9:9")
+    assert live._bucket("not an address") == live._bucket("also not")
 
 
 def test_spoofed_forwarding_header_is_ignored_where_no_tunnel(client, monkeypatch):

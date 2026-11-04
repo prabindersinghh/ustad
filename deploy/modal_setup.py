@@ -35,7 +35,7 @@ def store_secret() -> None:
     values = env_values()
     # Local paths mean nothing in the container. The open backend stays off.
     # Keys for other routes aren't needed up there: only what the app uses goes.
-    for local_only in ("FFMPEG", "DB_PATH", "REASONING_BACKEND", "AI_GATEWAY_API_KEY", "MODAL_PROXY_TOKEN"):
+    for local_only in ("FFMPEG", "DB_PATH", "REASONING_BACKEND", "AI_GATEWAY_API_KEY", "MODAL_PROXY_TOKEN", "TRUST_CF_CONNECTING_IP"):
         values.pop(local_only, None)
     # MODAL_X in .env becomes X on the public link only: the laptop stays open for work.
     for name in [k for k in values if k.startswith("MODAL_") and k != "MODAL_PROXY_TOKEN"]:

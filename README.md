@@ -299,7 +299,7 @@ From our own test runs against the live Meta APIs, November 2026.
 | Muse Spark 1.3 (live) | 8 of 8 | 0 | 4.6 s |
 | Muse Glimmer 30B, base model, through NVIDIA's API | 8 of 8 | 0 | 63 s |
 
-That's a small sample. `scripts/evaluate.py` replays labelled frames through the same `judge_step` code the live loop runs, and reports false passes as the safety-critical number. 280 automated tests run with no network.
+That's a small sample. `scripts/evaluate.py` replays labelled frames through the same `judge_step` code the live loop runs, and reports false passes as the safety-critical number. 282 automated tests run with no network.
 
 ### What isn't done yet
 
@@ -361,7 +361,7 @@ backend/
 web/                 landing, app, dashboard, evidence pack
 scripts/             smoke test, evaluation, replay, RL episodes, overlay renderer
 deploy/              the public link on Modal
-tests/               280 tests, no network
+tests/               282 tests, no network
 docs/                architecture, decisions, runbook, status, timeline
 ```
 
