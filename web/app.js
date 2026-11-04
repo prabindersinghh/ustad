@@ -34,9 +34,52 @@ document.addEventListener('click', (e) => {
   const dest = btn.dataset.go;
   Voice.unlock();
   if (dest === 'home') { Capture.teardown(); Guide.teardown(); show('home'); }
-  else if (dest === 'capture') Capture.open();
-  else if (dest === 'library') Library.open();
+  else if (dest === 'capture') Access.then(() => Capture.open());
+  else if (dest === 'library') Access.then(() => Library.open());
 });
+
+/* -------------------------------------------------------- demo sign-in */
+
+/* The landing page is public. The app asks for the demo code once per device. */
+const Access = {
+  state: null,
+  async status() {
+    if (this.state && this.state.signed_in) return this.state;
+    try { this.state = await fetch('/api/me').then((r) => r.json()); }
+    catch (_) { this.state = { required: false, signed_in: true }; }   // offline: the app's own recovery takes over
+    return this.state;
+  },
+  async then(next) {
+    const s = await this.status();
+    if (!s.required || s.signed_in) { next(); return; }
+    this.prompt(next);
+  },
+  prompt(next) {
+    const box = $('signin');
+    const form = $('signin-form');
+    const err = $('signin-error');
+    err.textContent = '';
+    box.hidden = false;
+    $('signin-code').focus();
+    $('signin-close').onclick = () => { box.hidden = true; };
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const r = await fetch('/api/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: $('signin-code').value }),
+      }).catch(() => null);
+      if (r && r.ok) {
+        this.state = { required: true, signed_in: true };
+        box.hidden = true;
+        next();
+        return;
+      }
+      err.textContent = !r ? 'No connection. Try again.'
+        : r.status === 429 ? 'Too many attempts. Try again in a few minutes.' : "That code isn't right.";
+    };
+  },
+};
 
 /* ------------------------------------------------------------- language */
 
@@ -1840,9 +1883,17 @@ function clearCameraError(wrapEl) {
  * with that one ready, one tap from starting. */
 Lang.init();
 
+(function signinLink() {
+  const next = new URLSearchParams(location.search).get('signin');
+  if (next === null) return;
+  // Only a page on this site: never send someone elsewhere after signing in.
+  const safe = /^\/(dashboard|evidence)(\?|$)/.test(next) ? next : '/';
+  Access.then(() => { location.href = safe; });
+})();
+
 (function runLink() {
   const pid = new URLSearchParams(location.search).get('run');
-  if (pid) Library.open(pid, 'Ready to run. Tap to start');
+  if (pid) Access.then(() => Library.open(pid, 'Ready to run. Tap to start'));
 })();
 
 fetch('/api/health')
@@ -1901,23 +1952,4 @@ fetch('/api/health')
   mv.addEventListener('camera-change', update);
   mv.addEventListener('load', update);
   update();
-})();
-
-/* The loop figure is same-origin: size its frame to the drawing so it never
- * shows a scrollbar, and again whenever the page width changes. */
-(function fitLoopFigure() {
-  const frame = document.getElementById('loop-frame');
-  if (!frame) return;
-  const fit = () => {
-    try {
-      const doc = frame.contentDocument;
-      const plate = doc && doc.querySelector('.iso-plate');
-      if (!plate) return;
-      doc.documentElement.style.overflow = 'hidden';
-      frame.style.height = Math.ceil(plate.getBoundingClientRect().bottom + 12) + 'px';
-    } catch (_) {}
-  };
-  frame.addEventListener('load', fit);
-  window.addEventListener('resize', fit);
-  fit();
 })();

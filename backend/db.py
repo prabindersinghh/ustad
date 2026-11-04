@@ -504,6 +504,12 @@ def usage_total() -> float:
     return float(row[0] or 0)
 
 
+def usage_last_hour() -> float:
+    with connect() as conn:
+        row = conn.execute("SELECT COALESCE(SUM(cost), 0) FROM usage WHERE at > ?", (time.time() - 3600,)).fetchone()
+    return float(row[0] or 0)
+
+
 def usage_summary() -> dict[str, Any]:
     """Spend so far, by model, plus the last hour, for the dashboard meter."""
     with connect() as conn:

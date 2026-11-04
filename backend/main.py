@@ -9,21 +9,23 @@ phone for Ray-Ban Meta glasses later without touching this file.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hmac
 import json
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, improve, live, meta_client, second_opinion
+from . import access, config, db, improve, live, meta_client, second_opinion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +56,57 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Open to anyone: the landing page and what it needs. Everything else is signed in.
+_OPEN_API = {"/api/health", "/api/login", "/api/me", "/api/clientlog"}
+_SIGNED_IN_PAGES = {"/dashboard", "/evidence"}
+
+
+@app.middleware("http")
+async def _access_gate(request: Request, call_next):
+    path = request.url.path
+    if access.enabled() and not access.signed_in(request.cookies.get(access.COOKIE)):
+        if (path.startswith("/api/") and path not in _OPEN_API) or path.startswith("/media/"):
+            return JSONResponse({"detail": "sign_in"}, status_code=401)
+        if path in _SIGNED_IN_PAGES:
+            target = path + ("?" + request.url.query if request.url.query else "")
+            return RedirectResponse("/?signin=" + quote(target, safe=""), status_code=303)
+    response = await call_next(request)
+    if path.startswith(("/models/", "/assets/")):
+        response.headers["Cache-Control"] = "public, max-age=604800"   # big and rarely changed
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
+_login_gates: dict[str, live._RateGate] = {}
+_login_all = live._RateGate(60, 600.0)
+
+
+@app.get("/api/me")
+def api_me(request: Request) -> dict[str, bool]:
+    return {"required": access.enabled(), "signed_in": access.signed_in(request.cookies.get(access.COOKIE))}
+
+
+@app.post("/api/login")
+def api_login(request: Request, payload: dict[str, Any]) -> JSONResponse:
+    """The demo sign-in. Attempts are limited, so the code can't be guessed."""
+    if not access.enabled():
+        return JSONResponse({"ok": True})
+    host = request.client.host if request.client else "?"
+    if len(_login_gates) > 2000:
+        _login_gates.clear()
+    gate = _login_gates.setdefault(host, live._RateGate(8, 600.0))
+    if not gate.allow() or not _login_all.allow():
+        raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
+    if not access.code_ok(payload.get("code")):
+        raise HTTPException(401, "That code isn't right.")
+    response = JSONResponse({"ok": True})
+    response.set_cookie(access.COOKIE, access.issue(), max_age=access.TTL_S, httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https")
+    return response
 
 
 def _decode_frame(payload: str) -> bytes:
@@ -268,6 +321,53 @@ def media(name: str) -> FileResponse:
 # (the phone's microphone, relayed to Muse Voice). The protocol lives in
 # backend/live.py.
 
+_live_sockets = 0
+_socket_gates: dict[str, live._RateGate] = {}
+
+
+def _socket_refusal(ws: WebSocket) -> str | None:
+    """Why this socket may not start paid work, or None."""
+    if not access.signed_in(ws.cookies.get(access.COOKIE)):
+        return "Please sign in to the demo first."
+    stop = access.spend_stop()
+    if stop:
+        return stop
+    if config.MAX_LIVE_SOCKETS and _live_sockets >= config.MAX_LIVE_SOCKETS:
+        return "The demo is full right now. Please try again in a few minutes."
+    if not config.SOCKETS_PER_CLIENT_PER_HOUR:
+        return None
+    host = live._client_of(ws)
+    if len(_socket_gates) > 2000:
+        _socket_gates.clear()
+    gate = _socket_gates.setdefault(host, live._RateGate(config.SOCKETS_PER_CLIENT_PER_HOUR, 3600.0))
+    if not gate.allow():
+        return "Too many sessions from this device. Please try again later."
+    return None
+
+
+async def _serve(ws: WebSocket, make_session) -> None:
+    """Accept, apply the demo's limits, run the session for at most MAX_SOCKET_S."""
+    global _live_sockets
+    await ws.accept()
+    refusal = _socket_refusal(ws)
+    if refusal:
+        await ws.send_json({"type": "error", "message": refusal})
+        await ws.close(code=4403)
+        return
+    _live_sockets += 1
+    try:
+        pump = _pump(ws, make_session(ws))
+        if config.MAX_SOCKET_S:
+            try:
+                await asyncio.wait_for(pump, timeout=config.MAX_SOCKET_S)
+            except asyncio.TimeoutError:
+                await ws.close(code=4408)
+        else:
+            await pump
+    finally:
+        _live_sockets -= 1
+
+
 async def _pump(ws: WebSocket, session) -> None:
     try:
         while True:
@@ -301,8 +401,7 @@ async def ws_capture(ws: WebSocket) -> None:
       <- {"type":"draft_title","n":N,"title":"..."}
       <- {"type":"status"|"frame_ack"|"error"|"procedure"|"pong", ...}
     """
-    await ws.accept()
-    await _pump(ws, live.CaptureSocket(ws))
+    await _serve(ws, live.CaptureSocket)
     log.info("capture socket closed")
 
 
@@ -319,8 +418,7 @@ async def ws_guide(ws: WebSocket) -> None:
       <- {"type":"thinking"|"answer"|"point"|"reference", ...}   Ask Ustad
       <- {"type":"speak"|"verdict"|"session"|"complete"|"error"|"pong", ...}
     """
-    await ws.accept()
-    await _pump(ws, live.GuideSession(ws))
+    await _serve(ws, live.GuideSession)
     log.info("guide socket closed")
 
 

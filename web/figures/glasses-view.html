@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ustad through glasses</title>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+
+html, body { margin: 0; height: 100%; background: #0a1020; overflow: hidden; }
+#fit { position: absolute; left: 0; top: 0; width: 1100px; height: 600px; transform-origin: 0 0; font-family: Figtree, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; overflow: hidden; background: #0a1020; }
+#world { position: absolute; left: 154px; top: -340px; width: 792px; height: 1241px; object-fit: fill; background: #0f1830; }
+#frame { position: absolute; inset: 0; }
+.hud { position: absolute; opacity: 0; transition: opacity .25s ease; }
+.on .hud.show-on, .boot .only-boot, .step .only-step, .check .only-check, .ok .only-ok, .warn .only-warn, .next .only-next { opacity: 1; }
+.card { background: rgba(10, 16, 32, .84); border-radius: 14px; padding: 14px 18px; }
+#tag { left: 700px; top: 58px; font-size: 20px; font-weight: 700; color: #8fb2ff; background: rgba(10,16,32,.84); padding: 8px 14px; border-radius: 10px; opacity: 1; }
+#voice { left: 700px; top: 112px; width: 196px; font-size: 26px; font-weight: 600; }
+#voice small { display: block; font-size: 18px; font-weight: 600; color: #8fb2ff; margin-bottom: 4px; }
+.say { left: 200px; bottom: 56px; width: 300px; }
+.say small { display: block; font-size: 19px; font-weight: 700; color: #8fb2ff; margin-bottom: 4px; }
+.say b { display: block; font-size: 28px; line-height: 1.14; font-weight: 700; }
+.say.only-ok small { color: #4fd1a1; }
+.say.only-warn { background: rgba(229, 72, 77, .96); }
+.only-warn small { color: #fff; }
+.pill { left: 200px; top: 58px; font-size: 21px; font-weight: 700; padding: 8px 15px; border-radius: 10px; background: rgba(10,16,32,.84); }
+.pill i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; background: #8fb2ff; }
+.pill.good i { background: #4fd1a1; }
+.box { left: 512px; top: 382px; width: 232px; height: 150px; border: 4px solid #fff; border-radius: 12px; outline: 3px solid #1a56e0; }
+.box.good { outline-color: #12a06a; }
+.box span { position: absolute; left: -4px; top: -40px; white-space: nowrap; background: #1a56e0; font-size: 20px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
+.box.good span { background: #12a06a; }
+.haz { left: 500px; top: 196px; width: 210px; height: 140px; border: 4px solid #fff; outline: 3px solid #e5484d; border-radius: 12px; }
+.haz span { position: absolute; left: -4px; bottom: -40px; white-space: nowrap; background: #e5484d; font-size: 20px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
+</style>
+</head>
+<body>
+<div id="fit" class="boot">
+  <video id="world" src="../assets/factory/glasses-view.mp4" muted loop playsinline autoplay preload="auto"></video>
+  <svg id="frame" viewBox="0 0 1100 600" aria-hidden="true">
+    <path fill="#0a1020" fill-rule="evenodd" d="M0 0H1100V600H0Z M204 30 H896 Q940 30 936 78 L908 400 Q896 556 720 566 H380 Q204 556 192 400 L164 78 Q160 30 204 30Z"/>
+    <path fill="none" stroke="#16264d" stroke-width="16" d="M204 30 H896 Q940 30 936 78 L908 400 Q896 556 720 566 H380 Q204 556 192 400 L164 78 Q160 30 204 30Z"/>
+    <path fill="#16264d" d="M0 96 H172 V150 H0Z M932 56 H1100 V100 H932Z"/>
+  </svg>
+  <div id="tag" class="hud">Concept view</div>
+  <div id="voice" class="hud only-check only-ok card"><small>The worker says</small>"Done."</div>
+
+  <div class="hud pill only-step only-next"><i></i>Watching</div>
+  <div class="hud pill only-check"><i></i>Checking</div>
+  <div class="hud pill good only-ok"><i></i>Verified</div>
+
+  <div class="hud box only-step only-check"><span>blue plastic part</span></div>
+  <div class="hud box good only-ok"><span>blue plastic part: seated</span></div>
+  <div class="hud haz only-warn"><span>Keep clear: print head</span></div>
+
+  <div class="hud say card only-boot"><small>Ustad</small><b>Starting the job.</b></div>
+  <div class="hud say card only-step only-check"><small>Step 2 of 4</small><b>Place a blue part onto the fixture.</b></div>
+  <div class="hud say card only-ok"><small>Step 2 verified</small><b>That's right. Next step.</b></div>
+  <div class="hud say card only-warn"><small>Safety</small><b>Hand near the print head. Keep clear.</b></div>
+  <div class="hud say card only-next"><small>Step 3 of 4</small><b>Press the blue part firmly down.</b></div>
+</div>
+<script>
+  const fit = document.getElementById('fit');
+  const world = document.getElementById('world');
+  const PHASES = [[0, 'boot'], [1.2, 'step'], [5.5, 'check'], [7, 'ok'], [9.6, 'warn'], [13, 'next']];
+  function phaseAt(t) {
+    let name = PHASES[0][1];
+    for (const [at, p] of PHASES) if (t >= at) name = p;
+    return name;
+  }
+  function paint(t) { fit.className = phaseAt(t); }
+  function size() { fit.style.transform = 'scale(' + (innerWidth / 1100) + ')'; }
+  addEventListener('resize', size);
+  size();
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const param = new URLSearchParams(location.search).get('t');
+  if (param !== null || still) {
+    world.removeAttribute('autoplay');
+    world.pause();
+    paint(param !== null ? +param : 8);
+  } else {
+    (function tick() { paint(world.currentTime); requestAnimationFrame(tick); })();
+    world.play().catch(() => {});
+  }
+  // For making the README animation, frame by frame.
+  window.seekTo = (t) => new Promise((done) => {
+    world.pause();
+    paint(t);
+    world.onseeked = () => { world.onseeked = null; done(); };
+    world.currentTime = t;
+  });
+</script>
+</body>
+</html>

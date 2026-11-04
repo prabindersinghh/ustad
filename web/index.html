@@ -10,10 +10,11 @@
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="assets/logo.png" />
 <title>Ustad · AI copilot for factory workers</title>
+<link rel="preload" href="assets/poster-glasses.webp" as="image" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=18" />
+<link rel="stylesheet" href="app.css?v=20" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -174,10 +175,9 @@
         <p class="body wide">Reading a checklist aloud is easy. Ustad looks at the work itself, decides
           whether the step is really done, and acts on that decision before the operator moves on.</p>
         <figure class="loop-fig">
-          <iframe id="loop-frame" src="figures/loop-embed.html" title="Interactive verification gauge" scrolling="no"></iframe>
-          <figcaption>The loop as one instrument. Hover the figure to slide between a frame done right,
-            one done wrong, and one the camera can't read.
-            <a href="figures/loop.html" target="_blank" rel="noopener">Open full screen</a></figcaption>
+          <iframe id="loop-frame" src="figures/glasses-view.html" title="What a worker would see through glasses with Ustad: the step, the part it found, the verdict and safety warnings" scrolling="no" loading="lazy"></iframe>
+          <figcaption>Concept view: how Ustad could look through glasses with a display. Glasses without one
+            would speak the same words. Not tested on glasses yet. Today the same steps and checks run on a phone.</figcaption>
         </figure>
         <ol class="loop-steps">
           <li><span class="n">1</span><div><b>See</b><p>The operator's view, already streaming, is the frame that gets judged.</p></div></li>
@@ -276,9 +276,9 @@
         <div class="device-grid">
           <article class="device">
             <div class="device-stage">
-              <model-viewer src="models/iphone.glb" alt="Phone running Ustad" auto-rotate
+              <model-viewer src="models/iphone.glb" poster="assets/poster-iphone.webp" alt="Phone running Ustad" auto-rotate
                 rotation-per-second="18deg" camera-controls disable-zoom disable-pan interaction-prompt="none"
-                environment-image="neutral" exposure="1.1" shadow-intensity="0.6" loading="lazy" reveal="auto"
+                environment-image="neutral" exposure="1.1" shadow-intensity="0.6" loading="eager" reveal="auto"
                 touch-action="pan-y" camera-orbit="0deg 82deg 160%"><div slot="progress-bar"></div></model-viewer>
             </div>
             <span class="tag">Today</span>
@@ -288,7 +288,7 @@
           </article>
           <article class="device feature">
             <div class="device-stage">
-              <model-viewer src="models/glasses.glb" alt="Ray-Ban Meta glasses" auto-rotate
+              <model-viewer src="models/glasses.glb" poster="assets/poster-glasses.webp" alt="Ray-Ban Meta glasses" auto-rotate
                 rotation-per-second="18deg" camera-controls disable-zoom disable-pan interaction-prompt="none"
                 environment-image="neutral" exposure="1.15" shadow-intensity="0.7" loading="lazy" reveal="auto"
                 touch-action="pan-y" camera-orbit="24deg 80deg 110%"><div slot="progress-bar"></div></model-viewer>
@@ -473,6 +473,18 @@
   <div id="report-body" class="list"></div>
 </section>
 
-<script src="app.js?v=22"></script>
+<div id="signin" class="signin" hidden>
+  <form id="signin-form" class="signin-card" autocomplete="off">
+    <button type="button" id="signin-close" class="signin-close" aria-label="Close">&times;</button>
+    <img src="assets/logo-blue.png" alt="Ustad" />
+    <h2>Sign in to the demo</h2>
+    <p>Enter the demo access code you were given. A plant would sign in with its own accounts.</p>
+    <label for="signin-code">Access code</label>
+    <input id="signin-code" type="text" autocapitalize="characters" spellcheck="false" required />
+    <div id="signin-error" class="signin-error" role="alert"></div>
+    <button type="submit" class="signin-go">Sign in</button>
+  </form>
+</div>
+<script src="app.js?v=24"></script>
 </body>
 </html>

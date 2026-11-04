@@ -148,6 +148,12 @@ def supervisor_token() -> str:
 # and guide mode falls back to tap/voice checks rather than overspending.
 # --------------------------------------------------------------------------
 BUDGET_USD = float(os.getenv("BUDGET_USD", "50"))
+# The public demo: a shared sign-in code, and limits on what strangers can spend.
+DEMO_ACCESS_CODE = os.getenv("DEMO_ACCESS_CODE", "")
+HOURLY_SPEND_CAP_USD = float(os.getenv("HOURLY_SPEND_CAP_USD", "0"))   # 0 is off
+MAX_SOCKET_S = int(os.getenv("MAX_SOCKET_S", "0"))                     # 0 is off
+MAX_LIVE_SOCKETS = int(os.getenv("MAX_LIVE_SOCKETS", "0"))             # 0 is off
+SOCKETS_PER_CLIENT_PER_HOUR = int(os.getenv("SOCKETS_PER_CLIENT_PER_HOUR", "0"))   # 0 is off
 PRICE_SAM_IMAGE = 2.50 / 1000
 PRICE_SPARK_IN = 1.25 / 1_000_000
 PRICE_SPARK_CACHED = 0.15 / 1_000_000

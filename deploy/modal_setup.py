@@ -37,6 +37,9 @@ def store_secret() -> None:
     # Keys for other routes aren't needed up there: only what the app uses goes.
     for local_only in ("FFMPEG", "DB_PATH", "REASONING_BACKEND", "AI_GATEWAY_API_KEY", "MODAL_PROXY_TOKEN"):
         values.pop(local_only, None)
+    # MODAL_X in .env becomes X on the public link only: the laptop stays open for work.
+    for name in [k for k in values if k.startswith("MODAL_") and k != "MODAL_PROXY_TOKEN"]:
+        values[name[len("MODAL_"):]] = values.pop(name)
     if "SUPERVISOR_TOKEN" not in values:
         token = (ROOT / "data" / "supervisor_token.txt")
         if token.exists():

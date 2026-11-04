@@ -92,6 +92,7 @@ def segment(phrase: str, image: str | bytes) -> list[sam_parse.Detection]:
     `phrase` must be a short noun phrase ("red valve handle"), not a question.
     Always runs on the hosted API -- SAM 3.1 is not an open-weights release.
     """
+    _check_spend()
     resp = client().responses.create(
         model=config.SAM_MODEL,
         input=[
@@ -136,6 +137,17 @@ def _meter_tokens(model: str, usage: Any) -> None:
 # --------------------------------------------------------------------------
 # Reasoning
 # --------------------------------------------------------------------------
+
+class SpendLimit(RuntimeError):
+    """The public demo reached a spending limit. Travels like any failed model call."""
+
+
+def _check_spend() -> None:
+    from . import access  # imported here: access needs db, which needs nothing from this module
+    reason = access.spend_stop()
+    if reason:
+        raise SpendLimit(reason)
+
 
 class _FunctionCall:
     """Mimics a Responses API function_call item."""
@@ -206,6 +218,7 @@ def reason(
         kwargs["max_output_tokens"] = max_output_tokens
     if cache_key:
         kwargs["prompt_cache_key"] = cache_key
+    _check_spend()
     resp = client().responses.create(**kwargs)
     _meter_tokens(kwargs["model"], getattr(resp, "usage", None))
     try:
@@ -356,6 +369,7 @@ def transcribe(
     container, so we transcode first. Raises on failure; the caller decides
     whether a capture can go on without narration.
     """
+    _check_spend()
     wav = _to_wav16k(audio_bytes, filename)
     req: dict[str, Any] = {
         "model": config.ASR_MODEL,

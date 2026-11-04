@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-04 IST · **Tests:** 254 passing
+**Last updated:** 2026-11-04 IST · **Tests:** 273 passing
 **Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $10.61 of the $50 working cap (`/api/usage`, 20:41)
 
 ## In one paragraph
@@ -35,6 +35,7 @@ approval makes a new version.
 | Demo film, 2:59, outside git at `data/factory/film/renders/ustad_demo.mp4`. Rebuild: `tools/build.py`, then `npx hyperframes render` in `data/factory/film` | Frames viewed and length checked. **Audio not heard by anyone yet** |
 | Replay and overlay: recorded footage through the real guide code | Sessions `9570097bec90`, `f359cde1ded5`. SAM found 9 of 25 object and frame pairs at 480 px; 2x did not help |
 | Edge-case review: Glimmer re-checks only a job's doubtful steps | One real run on a viewed photo: agreed, confidence 0.78, 84 s |
+| Public link protected: demo sign-in, spending limits ($25 total, $4 an hour on the cloud counter), session limits | 19 tests, real browser at phone size, checked on the public link |
 | Permanent public link, no laptop needed: https://prabindersinghh--ustad-web.us-east.modal.run | Public address 2026-11-04: real job, browser job, data survives a redeploy. Not yet tried on an iPhone |
 | Hindi guide: spoken and on-screen steps, verdicts and answers; Hindi voice commands; numbers checked in code | Real models on the user's job 2026-11-04; browser at phone size; 40 tests |
 | Guiding is fast: about 7 s per step from the finished state to the next instruction (was 11.5 to 30 s), on the user's real job; instant answer to "what do I do" | Real models 2026-11-04 01:30, same photos old vs new; tests |
