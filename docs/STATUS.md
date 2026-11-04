@@ -1,7 +1,7 @@
 # Status
 
-**Last updated:** 2026-11-04 IST · **Tests:** 186 passing
-**Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $5.17 of the $50 working cap
+**Last updated:** 2026-11-04 IST · **Tests:** 205 passing
+**Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $10.61 of the $50 working cap (`/api/usage`, 20:41)
 
 ## In one paragraph
 
@@ -67,11 +67,18 @@ approval makes a new version.
   on-premise tier is labelled "planned" on the landing page.
 - **Whether a partner API qualifies for the open-weight prize.** Official rules
   not found online; the user should check.
+- **A fine-tuned Glimmer does not exist.** What runs on NVIDIA today is base
+  Glimmer. Built and run: the episode set (`scripts/make_episodes.py`). Not run:
+  SFT, GRPO, any eval. No accuracy, loss or reward has been measured. Nothing may
+  be called fine-tuned or RL-trained until a training run has really happened
+  and been measured.
 
 ## Known issues
 
 | Issue | Impact | Plan |
 |---|---|---|
+| Three target phrases in the draft factory procedure (`f01d7d9cc120`) are never found by SAM: "red ink pad", "teal silicone pad", "rotary fixture", 0 of 199 frames | A guided run of that draft gets "no match" on steps 3, 4 and 5, and the judge is told to ask for a better view when the frame doesn't clearly show the criteria. Not tried end to end | Rewrite the phrases before demoing that procedure. Of 18 alternatives tried on 5 frames, only "red pad" (2 of 5) and "red rubber pad" (2 of 5) found the part; "machine" also matched but is too broad |
+| SAM's "human hand" misses fingertips at the frame edge: 19 of 153 hand frames in the factory clip got no detection at 0.5 confidence or above | Hand-near-hazard can miss a hand there. Advisory only, as already stated | Stated plainly. The judge also sees the image |
 | A restart of the Modal container loses up to 30 s of data and any capture take in progress | Rare. The guide resumes from saved steps; a take must be recorded again | Acceptable for the demo |
 | The laptop and the Modal link keep separate databases and separate spend counts | The budget guard sees each one's own spend. Check Meta's billing for the true total | Use the Modal link from now on |
 | An explicit "done" check took about 6.8 s median on 2026-11-03 (2.4 s measured on 11-02 with smaller frames) | Slower tap-to-verdict | Background auto-advance usually beats the tap. Re-measure; consider `minimal` for taps with a fresh grounding |

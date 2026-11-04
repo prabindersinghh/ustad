@@ -37,6 +37,10 @@ developer or coding agent. Read it fully before touching code.
 - **Public link.** https://prabindersinghh--ustad-web.us-east.modal.run runs on Modal from `deploy/`. Web and backend changes
   reach it only after `modal deploy deploy/modal_app.py`. Never re-run
   `modal_setup.py --seed` once real runs exist there: it overwrites them.
+- **Factory footage stays out of git and off NVIDIA's API.** `data/factory/` is
+  excluded through `.git/info/exclude`, not `.gitignore`: never `git add data` or
+  `git add -f` there. The user's order is that a fine-tuned Glimmer is an add-on:
+  it never guides live, and nothing is called fine-tuned until a run is measured.
 - **Budget.** Hackathon credit is $150; the working cap is `BUDGET_USD=50`.
   Every model call is metered (`/api/usage`). Probes that call real models
   cost money: say so and keep them small.

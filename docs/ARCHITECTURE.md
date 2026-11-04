@@ -48,7 +48,7 @@ lands here in the same commit.
 | `web/dashboard.html` | Spend meter; procedures with expert photos, quotes, tips, per-step insights and questions, the Improve panel (suggest, approve, history); sessions with evidence and a link to the pack. |
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
-| `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal). |
+| `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal), `make_episodes.py` (fine-tune episodes from the factory clip: labels by viewing, prompt captured from `judge_step`, SAM cached by image hash and phrase; output in `data/factory/rl/`, out of git). |
 | `tests/` | 175 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
