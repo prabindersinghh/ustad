@@ -1886,11 +1886,11 @@ Lang.init();
 Access.status();   // known before the first tap, so the app opens at once
 
 (async function accessLink() {
-  const u = new URL(location.href);
-  const code = u.searchParams.get('access');
-  if (!code) return;
-  u.searchParams.delete('access');
-  history.replaceState(null, '', u.pathname + u.search + u.hash);
+  // In the fragment, which browsers never send to a server, so it can't reach any log.
+  const m = /^#access=([^&]+)$/.exec(location.hash);
+  if (!m) return;
+  const code = decodeURIComponent(m[1]);
+  history.replaceState(null, '', location.pathname + location.search);
   const r = await fetch('/api/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
   }).catch(() => null);
