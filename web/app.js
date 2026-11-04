@@ -1883,6 +1883,8 @@ function clearCameraError(wrapEl) {
  * with that one ready, one tap from starting. */
 Lang.init();
 
+Access.status();   // known before the first tap, so the app opens at once
+
 (function signinLink() {
   const next = new URLSearchParams(location.search).get('signin');
   if (next === null) return;
