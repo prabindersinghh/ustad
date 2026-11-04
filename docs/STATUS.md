@@ -55,6 +55,7 @@ approval makes a new version.
 | Safety gate: lockout, reading, timed and confirm steps never inferred | 3 tests; security review fix |
 | Step kinds, multi-object live view, hand-near-hazard, left-behind tools | Earlier commits; tests and real SAM probes |
 | iPhone camera recovery, self-healing mic, phone telemetry | Browser fault injection; tests |
+| `scripts/replay.py`: a video file through the real `guide.verify_step`, saved as a session named `replay: <file>` with video times and boxes | Real run on the factory clip (session `9570097bec90`, 4 of 5 verified, 1 better view); 10 tests |
 
 ## Not verified yet (do not claim)
 
@@ -65,6 +66,10 @@ approval makes a new version.
 - **Muse Glimmer on hardware we control.** It has only run through NVIDIA's API.
   Modal refuses any GPU without a card, despite the user's $100.99 credit. The
   on-premise tier is labelled "planned" on the landing page.
+- **SAM on the factory clip's draft phrases.** Measured at 480 px: 2 of 5 phrases
+  ground. "red ink pad", "teal silicone pad" and "rotary fixture" were found on
+  0 of 5 frames, and 2x did not change that. Do not claim SAM grounded every
+  step of that replay. The procedure is a draft for the user to correct.
 - **Whether a partner API qualifies for the open-weight prize.** Official rules
   not found online; the user should check.
 

@@ -62,6 +62,20 @@ These hit the real APIs and **cost money** (cents):
 
 Spend so far: `curl -s localhost:8800/api/usage`.
 
+Replay a video through the real pipeline (real SAM and Spark calls, about 3 US
+cents for 5 checkpoints; needs `ffmpeg`, `ffprobe`, and Pillow for the sheets).
+It writes a real session, marked `replay: <file>`, into the shared database,
+and refuses to run unless reasoning is on the hosted Meta API:
+
+```bash
+.venv/Scripts/python.exe -m scripts.replay --video factory.mp4 --procedure <id> --checkpoints 6,14,22,30,38
+.venv/Scripts/python.exe -m scripts.replay --video factory.mp4 --procedure <id> --checkpoints 6,14,22,30,38 --upscale 2
+.venv/Scripts/python.exe -m scripts.replay --video factory.mp4 --procedure <id> --checkpoints 6,14,22,30,38 --compare-upscale 2 --out-dir data/factory/replay/sam_compare
+```
+
+A name without a folder is looked up in `data/factory/`, which is excluded from
+git. Never send factory footage to the Glimmer second opinion.
+
 ## Reading phone telemetry
 
 Every guide session ends with one line:

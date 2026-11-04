@@ -48,7 +48,7 @@ lands here in the same commit.
 | `web/dashboard.html` | Spend meter; procedures with expert photos, quotes, tips, per-step insights and questions, the Improve panel (suggest, approve, history); sessions with evidence and a link to the pack. |
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
-| `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal). |
+| `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal), `replay.py` (a video file through the real `guide.verify_step`, written as a genuine session named `replay: <file>`; `--compare-upscale` measures SAM at native width vs upscaled and draws the boxes). |
 | `tests/` | 175 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
@@ -276,6 +276,7 @@ chunks.
     `inferred`, `confirmed` and `skipped` (`db.DONE_VERDICTS`). Metrics count
     only `pass`, `fail` and `retry` as checks (`db.CHECK_VERDICTS`).
 - New columns are added by `MIGRATIONS` on start, so an old database upgrades in place.
+- `replay_checkpoints(session_id, checkpoint_s, event_id, step_index, video, phrase, tool, say, upscale, video_w, video_h, frame_w, frame_h, detections, sam_error, created_at)`: replays only. The video time of each check and every SAM box (`step_events` keeps boxes only on a pass or a fail), joined to its verdict by `db.replay_checkpoints`. Boxes are in the coordinates of the image sent; `scripts.replay.to_source_box` maps them to source pixels using the size SAM reports. Live sessions never write here.
 - `usage(id, at, model, kind, units, cost, note)`: every billed call.
 
 ## Models and what each call costs
