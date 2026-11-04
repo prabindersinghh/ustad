@@ -1919,7 +1919,8 @@ fetch('/api/health')
       return;
     }
     const where = h.reasoning_backend === 'open' ? 'self-hosted' : 'Meta Model API';
-    $('health-text').textContent = `${h.models.reasoning} · ${h.models.sam} · ${where}`;
+    $('health-text').textContent = 'Live · Built for Meta glasses';
+    $('home-status').title = `${h.models.reasoning} · ${h.models.sam} · ${where}`;
   })
   .catch(() => {
     $('health-dot').className = 'dot bad';
