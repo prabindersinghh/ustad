@@ -32,7 +32,7 @@ approval makes a new version.
 |---|---|
 | Muse Glimmer second opinion on a finished job: same judge, model id recorded, can't affect live guiding | 8 cases 2026-11-04: Glimmer 8/8 at 63 s median, Muse Spark 8/8 at 4.6 s, no false passes. Real run through the public link. 11 tests |
 | Landing page shows real MCPL photos, in the Proof section | Checked at phone and desktop width |
-| Demo video, 2:57, outside git at `data/factory/replay/demo_full.mp4`. Rebuild with `python -m scripts.demo_cut` | Frames viewed and length checked. **Audio not heard by anyone yet** |
+| Demo film, 2:59, outside git at `data/factory/film/renders/ustad_demo.mp4`. Rebuild: `tools/build.py`, then `npx hyperframes render` in `data/factory/film` | Frames viewed and length checked. **Audio not heard by anyone yet** |
 | Replay and overlay: recorded footage through the real guide code | Sessions `9570097bec90`, `f359cde1ded5`. SAM found 9 of 25 object and frame pairs at 480 px; 2x did not help |
 | Edge-case review: Glimmer re-checks only a job's doubtful steps | One real run on a viewed photo: agreed, confidence 0.78, 84 s |
 | Permanent public link, no laptop needed: https://prabindersinghh--ustad-web.us-east.modal.run | Public address 2026-11-04: real job, browser job, data survives a redeploy. Not yet tried on an iPhone |

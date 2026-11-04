@@ -8,6 +8,10 @@
 
 An expert does a job once. Ustad turns it into a checkable procedure, then guides any worker through it hands-free and verifies every step on camera.
 
+## Built for Meta glasses
+
+Ray-Ban Meta glasses are where Ustad is going: a camera that sees what the hands do, microphones that hear the worker, and speakers that talk them through the job. Both hands stay on the work. Today Ustad runs in the browser on a phone clipped to the chest, using the same loop. It has not been tested on the glasses yet.
+
 ## The problem
 
 What a factory job really takes is often in the head of one expert. When that person is away, the next worker is on their own, and a checklist can't see whether the work was done.
