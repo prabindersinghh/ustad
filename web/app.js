@@ -1902,7 +1902,7 @@ Access.status();   // known before the first tap, so the app opens at once
   if (next === null) return;
   // Only a page on this site: never send someone elsewhere after signing in.
   const safe = /^\/(dashboard|evidence)(\?|$)/.test(next) ? next : '/';
-  Access.then(() => { location.href = safe; });
+  Access.then(() => { location.replace(safe); });
 })();
 
 (function runLink() {

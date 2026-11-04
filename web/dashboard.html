@@ -128,7 +128,7 @@
 </head>
 <body>
 <header class="top">
-  <h1><img src="assets/logo-blue.png" alt="" style="height:30px;width:auto;vertical-align:-6px;margin-right:8px" />Ustad <small>supervisor dashboard</small></h1>
+  <h1><a href="/" aria-label="Back to the Ustad home page" style="color:inherit;text-decoration:none"><img src="assets/logo-blue.png" alt="" style="height:30px;width:auto;vertical-align:-6px;margin-right:8px" />Ustad</a> <small>supervisor dashboard</small></h1>
   <div class="backend-chip" id="backend-chip">loading…</div>
 </header>
 
@@ -158,7 +158,7 @@
     const r = await raw(...a);
     if (r.status === 401 && String(a[0]).startsWith('/api/') && !(a[1] && a[1].headers && a[1].headers['X-Supervisor-Token'])) {
       const body = await r.clone().json().catch(() => ({}));
-      if (body.detail === 'sign_in') location.href = '/?signin=' + encodeURIComponent(location.pathname + location.search);
+      if (body.detail === 'sign_in') location.replace('/?signin=' + encodeURIComponent(location.pathname + location.search));
     }
     return r;
   };
