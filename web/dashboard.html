@@ -128,7 +128,7 @@
 </head>
 <body>
 <header class="top">
-  <h1><span class="mark">U</span>stad <small>supervisor dashboard</small></h1>
+  <h1><img src="assets/logo-blue.png" alt="" style="height:30px;width:auto;vertical-align:-6px;margin-right:8px" />Ustad <small>supervisor dashboard</small></h1>
   <div class="backend-chip" id="backend-chip">loading…</div>
 </header>
 
@@ -150,6 +150,20 @@
   <div id="detail"><p class="hint">Select a procedure or a session above to see its detail here.</p></div>
 </div>
 
+<script>
+// Signed out: go and sign in, rather than show an empty page.
+(function () {
+  const raw = window.fetch.bind(window);
+  window.fetch = async (...a) => {
+    const r = await raw(...a);
+    if (r.status === 401 && String(a[0]).startsWith('/api/') && !(a[1] && a[1].headers && a[1].headers['X-Supervisor-Token'])) {
+      const body = await r.clone().json().catch(() => ({}));
+      if (body.detail === 'sign_in') location.href = '/?signin=' + encodeURIComponent(location.pathname + location.search);
+    }
+    return r;
+  };
+})();
+</script>
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);

@@ -72,11 +72,25 @@
 <body>
 <div class="page">
   <div class="toolbar">
-    <div class="brand"><i>U</i>Ustad evidence pack</div>
+    <div class="brand"><img src="assets/logo-blue.png" alt="" style="height:28px;width:auto" />Ustad evidence pack</div>
     <button class="print" onclick="window.print()">Print or save as PDF</button>
   </div>
   <div class="sheet" id="sheet"><div class="empty">Loading…</div></div>
 </div>
+<script>
+// Signed out: go and sign in, rather than show an empty page.
+(function () {
+  const raw = window.fetch.bind(window);
+  window.fetch = async (...a) => {
+    const r = await raw(...a);
+    if (r.status === 401 && String(a[0]).startsWith('/api/') && !(a[1] && a[1].headers && a[1].headers['X-Supervisor-Token'])) {
+      const body = await r.clone().json().catch(() => ({}));
+      if (body.detail === 'sign_in') location.href = '/?signin=' + encodeURIComponent(location.pathname + location.search);
+    }
+    return r;
+  };
+})();
+</script>
 <script>
 'use strict';
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,

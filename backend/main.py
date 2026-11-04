@@ -77,7 +77,9 @@ async def _access_gate(request: Request, call_next):
             target = path + ("?" + query if query else "")
             return RedirectResponse("/?signin=" + quote(target, safe=""), status_code=303)
     response = await call_next(request)
-    if path.startswith(("/models/", "/assets/")):
+    if path == "/" or path in _SIGNED_IN_PAGES or path.endswith(".html"):
+        response.headers["Cache-Control"] = "no-store"
+    elif path.startswith(("/models/", "/assets/")):
         response.headers["Cache-Control"] = "public, max-age=604800"   # big and rarely changed
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"

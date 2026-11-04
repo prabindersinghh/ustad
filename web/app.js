@@ -1885,6 +1885,18 @@ Lang.init();
 
 Access.status();   // known before the first tap, so the app opens at once
 
+(async function accessLink() {
+  const u = new URL(location.href);
+  const code = u.searchParams.get('access');
+  if (!code) return;
+  u.searchParams.delete('access');
+  history.replaceState(null, '', u.pathname + u.search + u.hash);
+  const r = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+  }).catch(() => null);
+  if (r && r.ok) Access.state = { required: true, signed_in: true };
+})();
+
 (function signinLink() {
   const next = new URLSearchParams(location.search).get('signin');
   if (next === null) return;

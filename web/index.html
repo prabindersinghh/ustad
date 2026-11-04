@@ -280,8 +280,8 @@
         <div class="device-grid">
           <article class="device">
             <div class="device-stage">
-              <model-viewer src="models/iphone.glb" poster="assets/poster-iphone.webp" alt="Phone running Ustad" auto-rotate
-                rotation-per-second="18deg" camera-controls disable-zoom disable-pan interaction-prompt="none"
+              <model-viewer src="models/iphone.glb" poster="assets/poster-iphone.webp" alt="Phone running Ustad"
+                camera-controls disable-zoom disable-pan interaction-prompt="none" min-camera-orbit="-45deg 82deg auto" max-camera-orbit="45deg 82deg auto"
                 environment-image="neutral" exposure="1.1" shadow-intensity="0.6" loading="eager" reveal="auto"
                 touch-action="pan-y" camera-orbit="0deg 82deg 160%"><div slot="progress-bar"></div></model-viewer>
             </div>
@@ -489,6 +489,6 @@
     <button type="submit" class="signin-go">Sign in</button>
   </form>
 </div>
-<script src="app.js?v=25"></script>
+<script src="app.js?v=26"></script>
 </body>
 </html>
