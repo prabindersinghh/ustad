@@ -96,7 +96,7 @@ data/factory/replay/pwenv/Scripts/python.exe scripts/demo_record.py guide --came
 ```
 
 In Git Bash set `MSYS_NO_PATHCONV=1` first, or a `--path /dashboard` turns into a
-Windows path. Chromium's screencast returns CSS-size frames whatever the device
+Windows path. `--to "#proof"` scrolls pages that scroll an inner element, like the landing page. Chromium's screencast returns CSS-size frames whatever the device
 scale, so a sharp 1080p page needs a 1920x1080 viewport with `--zoom`.
 
 **Rebuilding the demo.** Change a line in `scripts/demo_lines.json`, then run this:

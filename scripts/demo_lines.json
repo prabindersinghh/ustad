@@ -1,6 +1,10 @@
 {
   "_note": "The demo's voice-over, one file per line. Change a line's text and run `python -m scripts.demo_cut` to regenerate that file and rebuild the cut. Voices are synthetic (edge-tts).",
-  "voices": {"vo": "en-US-AndrewNeural", "ustad": "en-IN-NeerjaNeural", "hindi": "hi-IN-SwaraNeural"},
+  "voices": {
+    "vo": "en-US-AndrewNeural",
+    "ustad": "en-IN-NeerjaNeural",
+    "hindi": "hi-IN-SwaraNeural"
+  },
   "lines": {
     "site_1": "This is MCPL, Modern Colours, in Ludhiana.",
     "site_2": "We also tested in a textile clothing factory.",
@@ -17,10 +21,12 @@
     "glimmer_2": "On 8 test cases, 4 of them deliberately wrong, Muse Spark got 8 of 8 at a 4.6 second median, and Muse Glimmer also got 8 of 8, at 63 seconds.",
     "glimmer_3": "So Glimmer is the second opinion after the job, for the doubtful steps.",
     "data_1": "And every job makes labelled data: what was asked, what the camera saw, what was right.",
-    "rl_1": "We built the reinforcement learning pipeline to train on that data.",
-    "close_1": "About 7 seconds from a tap to a verdict.",
+    "rl_1": "From one 42 second clip we already built 1,046 labelled training examples, for reinforcement learning on Muse Glimmer. Training hasn't run yet. This is how the models keep getting better with every job.",
+    "close_1": "In our test runs, about 7 seconds from finishing a step to the next instruction.",
     "close_2": "About 10 cents for a four-step job.",
     "close_3": "Starting with India, a huge market.",
-    "close_4": "Ustad: captures your best expert, and checks every step."
+    "close_4": "Ustad: captures your best expert, and checks every step.",
+    "catch_1": "Here is what it does when the work is wrong. In this test run the worker said done, but the bottle was still on the table.",
+    "catch_2": "Ustad refused the step, said why, and only passed it once the bottle was really in the air. Every attempt is on the record."
   }
 }

@@ -10,8 +10,8 @@ WebSocket log of the real run. Spoken app lines are placed with the app's own
 queue rules (scripts.demo_voice), since headless Chromium has no audible speech.
 
 Output, under data/factory/replay/, all 1920x1080 at 30 fps:
-  demo_capture.mp4, demo_guide.mp4, demo_part1.mp4, demo_site.mp4, demo_check.mp4,
-  demo_hindi.mp4, demo_glimmer.mp4, demo_close.mp4, demo_full.mp4
+  demo_capture.mp4, demo_guide.mp4, demo_part1.mp4, demo_catch.mp4, demo_site.mp4,
+  demo_check.mp4, demo_hindi.mp4, demo_glimmer.mp4, demo_close.mp4, demo_full.mp4
 Each has a .voice.wav stem and a .lines.json listing every spoken line with its
 start time and source.
 """
@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterator
 
 from PIL import Image, ImageDraw, ImageFont
 
+from backend import db
 from scripts.demo_voice import Spoken, map_time, output_length, place_queue
 
 REPLAY = Path("data/factory/replay")
@@ -51,7 +52,16 @@ PHONE_X, PHONE_Y = (W - PHONE_W) // 2, (H - PHONE_H) // 2
 # that moment still. Nothing here changes a verdict or a time shown on screen.
 CAPTURE_EDL = [(2.1, 22.6), (40.0, 41.0), (50.0, 50.8), (54.3, 56.2), (56.2, 56.2, 1.2)]
 GUIDE_EDL = [(1.5, 12.4), (16.9, 18.2), (25.0, 40.3), (42.0, 48.0)]
-HINDI_EDL = [(1.6, 5.6), (9.1, 23.3)]
+HINDI_EDL = [(1.6, 4.1), (9.1, 23.3)]
+RL_REPORT = Path("data/factory/rl/episodes_report.json")
+# Our own test run with a really wrong step. A desk, not a factory, and labelled so.
+CATCH_SESSION, CATCH_STEP = "af3b0ea0a00f", 1
+EDGE_SESSION = "41af986467a1"            # its second opinion is already stored: viewed, never requested
+# Each photo's crop, as fractions of the frame: keeps the hand, the bottle and the
+# table, and leaves out the Coca-Cola bottle on the right.
+CATCH_CROPS = {1: (0.0, 0.14, 0.66, 0.80), 2: (0.0, 0.14, 0.62, 0.80), 3: (0.0, 0.14, 0.70, 0.80)}
+TEST_RUN_LABEL = "From our own test run"
+VOICES_LABEL = "Voices are synthetic."
 EXPERT_FILES = [("n1", 4.8), ("n2", 11.85), ("n3", 15.5)]   # seconds after the fake mic opened
 
 
@@ -277,13 +287,17 @@ def render_phone_part(run: Run, edl: list[tuple[float, ...]], out: Path, spoken:
     enc.close()
 
 
-def render_screens(enc: Encoder, run: Run, start: float, seconds: float, overlay: Image.Image | None = None) -> None:
+def render_screens(enc: Encoder, run: Run, start: float, seconds: float, overlay: Image.Image | None = None,
+                   crop: tuple[int, int, int, int] | None = None, top_left: Image.Image | None = None) -> None:
     """A real page for `seconds`, from `start` in its recording, then held still."""
     for k in range(round(seconds * FPS)):
-        img = run.image_at(start + k / FPS).resize((W, H), Image.LANCZOS)
+        img = run.image_at(start + k / FPS)
+        img = img.crop(crop) if crop else img
+        img = img.resize((W, H), Image.LANCZOS) if img.size != (W, H) else img.copy()
         if overlay is not None:
-            img = img.copy()
             img.paste(overlay, (0, H - overlay.height))
+        if top_left is not None:
+            img.paste(top_left, (24, 24))
         enc.add(img)
 
 
@@ -363,7 +377,94 @@ def link_bar() -> Image.Image:
     d = ImageDraw.Draw(bar)
     f = font(46, True)
     d.text(((W - f.getlength(PUBLIC_URL)) / 2, 30), PUBLIC_URL, font=f, fill=WHITE)
+    small = font(26)
+    d.text((W - small.getlength(VOICES_LABEL) - 40, 44), VOICES_LABEL, font=small, fill=WHITE)
     return bar
+
+
+def pill(text: str, size: int = 34) -> Image.Image:
+    f = font(size, True)
+    im = Image.new("RGB", (int(f.getlength(text)) + 56, size + 34), INK)
+    ImageDraw.Draw(im).text((28, 12), text, font=f, fill=WHITE)
+    return im
+
+
+def stored_opinion_bar() -> Image.Image:
+    """The stored second opinion, from the database: the page shows the verdict and
+    time, but not the confidence."""
+    row = db.second_opinions(EDGE_SESSION)[0]
+    said = "agreed with" if row.get("agrees") else "disagreed with"
+    text = (f"Stored result: Muse Glimmer {said} the {row['first_verdict']}, confidence {row['confidence']:.2f}, "
+            f"{row['latency_ms'] / 1000:.0f} s, model {row['model']}.")
+    bar = Image.new("RGB", (W, 84), INK)
+    f = font(32, True)
+    ImageDraw.Draw(bar).text(((W - f.getlength(text)) / 2, 20), text, font=f, fill=WHITE)
+    return bar
+
+
+def rl_numbers() -> dict[str, int]:
+    """From the episode builder's own report. Held out is both evaluation sets."""
+    report = json.loads(RL_REPORT.read_text(encoding="utf-8"))["episodes"]
+    train = sum(report["train"].values())
+    held = sum(sum(v.values()) for k, v in report.items() if k != "train")
+    return {"train": train, "held": held, "total": train + held}
+
+
+def rl_card(line: str) -> Image.Image:
+    """The numbers from the report, plainly. The spoken total must match them."""
+    n = rl_numbers()
+    if f"{n['total']:,}" not in line:
+        raise RuntimeError(f"rl_1 says something other than the report's total of {n['total']:,}")
+    im = Image.new("RGB", (W, H), "#f5f8fe")
+    d = ImageDraw.Draw(im)
+    d.text((180, 130), "Reinforcement learning on Muse Glimmer", font=font(52, True), fill=INK)
+    d.text((180, 230), f"{n['total']:,}", font=font(150, True), fill="#1a56e0")
+    d.text((180, 430), "labelled training examples, from one 42 second clip", font=font(44), fill="#33405c")
+    for x, value, label in ((180, n["train"], "train"), (640, n["held"], "held out")):
+        d.text((x, 530), f"{value:,}", font=font(110, True), fill=INK)
+        d.text((x, 680), label, font=font(44), fill="#33405c")
+    status, f = "Not trained yet", font(52, True)
+    w = f.getlength(status)
+    d.rounded_rectangle((180, 800, 180 + w + 80, 900), 50, fill="#e8900a")
+    d.text((220, 818), status, font=f, fill=INK)
+    return im
+
+
+def catch_rows() -> list[dict[str, Any]]:
+    """Step 2's attempts, from the database, photos and reasons as they were saved."""
+    rows = [e for e in db.session_log(CATCH_SESSION)["events"]
+            if e["step_index"] == CATCH_STEP and e["verdict"] in ("pass", "fail")]
+    if [e["attempt"] for e in rows] != [1, 2, 3]:
+        raise RuntimeError("Expected three attempts on the test run's step 2")
+    return rows
+
+
+def catch_frame(shown: int) -> Image.Image:
+    """The first `shown` attempts, side by side: each saved photo, cropped only to
+    leave out a branded bottle, with its real verdict and reason beneath."""
+    proc = db.get_procedure(db.session_log(CATCH_SESSION)["session"]["procedure_id"])
+    step = proc["steps"][CATCH_STEP]
+    im = Image.new("RGB", (W, H), "#f5f8fe")
+    d = ImageDraw.Draw(im)
+    d.text((70, 44), TEST_RUN_LABEL, font=font(32, True), fill="#1a56e0")
+    d.text((70, 88), f"Step {CATCH_STEP + 1}: {step['title']}", font=font(50, True), fill=INK)
+    d.text((70, 156), f"Done when: {step['success_criteria']}", font=font(32), fill="#33405c")
+    names = {"fail": ("Error caught", "#e5484d"), "pass": ("Verified", "#12a06a")}
+    width, gap, top, photo_h = 560, 40, 215, 640
+    for i, row in enumerate(catch_rows()[:shown]):
+        x = 70 + i * (width + gap)
+        src = Image.open(Path("data") / row["evidence_path"]).convert("RGB")
+        a, b, c, e = CATCH_CROPS[row["attempt"]]
+        cropped = src.crop((int(a * src.width), int(b * src.height), int(c * src.width), int(e * src.height)))
+        scale = min(width / cropped.width, photo_h / cropped.height)
+        pic = cropped.resize((round(cropped.width * scale), round(cropped.height * scale)), Image.LANCZOS)
+        im.paste(pic, (x, top))
+        name, colour = names[row["verdict"]]
+        conf = f" {row['confidence']:.2f}" if row.get("confidence") is not None else ""
+        y = top + photo_h + 18
+        d.text((x, y), f"Attempt {row['attempt']}: {name}{conf}", font=font(36, True), fill=colour)
+        text_block(d, x, y + 50, row["reason"], font(30), INK, width, 6)
+    return im
 
 
 # ----------------------------------------------------------------- part 1
@@ -532,14 +633,36 @@ def build_check(tts: str, texts: dict[str, str], voices: dict[str, str]) -> tupl
     return section("demo_check", list(p.values()), end, draw), list(p.values()), end
 
 
+def build_catch(tts: str, texts: dict[str, str], voices: dict[str, str]) -> tuple[Path, list[Spoken], float]:
+    p = lay_out(tts, ["catch_1", "catch_2"], texts, voices["vo"])
+    second_at = p["catch_2"].start
+    end = p["catch_2"].start + p["catch_2"].length + 0.5
+    page_at = second_at + 2.8            # then the real evidence page, to the end
+    label = pill(TEST_RUN_LABEL)
+    # Window of the page recorded at 2560x1440: all of the rows, and the photo up to
+    # the branded bottle at its right edge. Nothing in the rows is cut.
+    window = (0, 180, 1920, 1260)
+
+    def draw(enc: Encoder) -> None:
+        for k in range(round(page_at * FPS)):
+            t = k / FPS
+            shown = 1 if t < p["catch_1"].start + p["catch_1"].length * 0.45 else 2 if t < second_at else 3
+            enc.add(catch_frame(shown))
+        render_screens(enc, Run("run_bottle"), 0.2, end - page_at, crop=window, top_left=label)
+    return section("demo_catch", list(p.values()), end, draw), list(p.values()), end
+
+
 def build_hindi(tts: str, texts: dict[str, str], voices: dict[str, str]) -> tuple[Path, list[Spoken], float]:
     run = Run("run_hindi")
     first = next(e for e in run.events if e.get("type") == "speak")
-    file = make_voice(tts, "hindi_app_line", first["text"], voices["hindi"])
+    # The first two of the line's three sentences, to keep the section short.
+    spoken_text = "\u0964".join(first["text"].split("\u0964")[:2]).strip() + "\u0964"
+    file = make_voice(tts, "hindi_app_line", spoken_text, voices["hindi"])
     one = lay_out(tts, ["hindi_1"], texts, voices["vo"])["hindi_1"]
     hindi_at = max(map_time(HINDI_EDL, first["at"]), one.start + one.length + 0.2)
-    app_line = Spoken(file, hindi_at, probe_duration(file), "Ustad says", first["text"],
-                      f"websocket speak, session {run.info.get('session_id')}, {first['at']:.2f} s into the run")
+    app_line = Spoken(file, hindi_at, probe_duration(file), "Ustad says", spoken_text,
+                      f"websocket speak, first two of its three sentences, session {run.info.get('session_id')}, "
+                      f"{first['at']:.2f} s into the run")
     two = lay_out(tts, ["hindi_2"], texts, voices["vo"], start=hindi_at + app_line.length + 0.3)["hindi_2"]
     spoken = [one, app_line, two]
     end = two.start + two.length + 0.4
@@ -566,15 +689,19 @@ def build_glimmer(tts: str, texts: dict[str, str], voices: dict[str, str]) -> tu
     t1 = p["glimmer_2"].start - 0.1
     t2 = p["glimmer_3"].start - 0.1
     t3 = p["data_1"].start - 0.1
+    t4 = p["rl_1"].start - 0.1
     end = p["rl_1"].start + p["rl_1"].length + 0.5
-    second = Run("run_second")
-    card = measured_card()
+    edge = Run("run_edge")
+    card, numbers = measured_card(), rl_card(texts["rl_1"])
+    stored = stored_opinion_bar()
 
     def draw(enc: Encoder) -> None:
-        render_screens(enc, second, 0.2, t1)
+        render_screens(enc, edge, 0.0, t1)
         enc.add(card, round((t2 - t1) * FPS))
-        render_screens(enc, second, second.times[-1], t3 - t2)         # the stored result, scrolled to
-        render_screens(enc, Run("run_evidence"), 6.0, end - t3)
+        # The real page, on the doubtful-steps button and the stored result. Not pressed.
+        render_screens(enc, edge, edge.times[-1], t3 - t2, stored)
+        render_screens(enc, Run("run_evidence"), 6.0, t4 - t3)
+        enc.add(numbers, round((end - t4) * FPS))
     return section("demo_glimmer", list(p.values()), end, draw), list(p.values()), end
 
 
@@ -584,7 +711,8 @@ def build_close(tts: str, texts: dict[str, str], voices: dict[str, str]) -> tupl
     bar = link_bar()
 
     def draw(enc: Encoder) -> None:
-        render_screens(enc, Run("run_dash"), 0.5, end, bar)
+        # The measured table first, then up to the MCPL photos, where it ends.
+        render_screens(enc, Run("run_proof"), 2.8, end, bar)
     return section("demo_close", list(p.values()), end, draw), list(p.values()), end
 
 
@@ -614,7 +742,7 @@ def main() -> None:
     (REPLAY / "demo_part1.lines.json").write_text(
         json.dumps({"video": "demo_part1.mp4", "lines": part1_rows}, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    built = [b(args.tts, texts, voices) for b in (build_site, build_check, build_hindi, build_glimmer, build_close)]
+    built = [b(args.tts, texts, voices) for b in (build_catch, build_site, build_check, build_hindi, build_glimmer, build_close)]
     join([REPLAY / "demo_part1.mp4"] + [b[0] for b in built], REPLAY / "demo_full.mp4")
 
     rows, at = list(part1_rows), probe_duration(REPLAY / "demo_part1.mp4")

@@ -74,8 +74,9 @@ approval makes a new version.
   ground. "red ink pad", "teal silicone pad" and "rotary fixture" were found on
   0 of 5 frames, and 2x did not change that. Do not claim SAM grounded every
   step of that replay. The procedure is a draft for the user to correct.
-- **An "error caught" on the factory clip.** The real guide run flagged nothing: 4 passes, 0 errors. It did give
-  2 live hand warnings. The demo has no staged error, and no error moment.
+- **An "error caught" on the factory clip.** The real guide run flagged nothing: 4 passes, 0 errors, 2 live hand
+  warnings. The demo's error moment is from our own test run (session `af3b0ea0a00f`, a bottle on a desk), and is
+  labelled so. Don't describe it as a factory result.
 - **Whether a partner API qualifies for the open-weight prize.** Official rules
   not found online; the user should check.
 - **The edge-case review on real Glimmer.** Built and tested with mocked models,

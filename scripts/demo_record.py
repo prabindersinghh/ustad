@@ -236,12 +236,17 @@ async def run_visit(args: argparse.Namespace) -> None:
         await rec.start(page, max_width=round(w * args.scale), max_height=round(h * args.scale))
         offsets = [int(v) for v in args.scroll.split(",")] if args.scroll else []
         hovers = [int(v) for v in args.hover.split(",")] if args.hover else []
-        legs = max(1, len(offsets), len(hovers))
+        targets = [v for v in args.to.split(",") if v] if args.to else []
+        legs = max(1, len(offsets), len(hovers), len(targets))
         per = args.seconds / legs
         for i in range(legs):
             if i < len(hovers):
                 await page.mouse.move(hovers[i], h // 2, steps=20)
-            if i < len(offsets):
+            if i < len(targets):
+                # For pages that scroll an inner element rather than the window.
+                await page.evaluate("(sel) => document.querySelector(sel).scrollIntoView({behavior: 'smooth', block: 'start'})", targets[i])
+                await page.wait_for_timeout(int(per * 1000))
+            elif i < len(offsets):
                 # A slow, even scroll over most of this leg, then a rest on the new view.
                 await page.evaluate(
                     """([to, ms]) => new Promise((done) => {
@@ -282,6 +287,7 @@ def main() -> None:
     ap.add_argument("--viewport", default="1600x900")
     ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--zoom", type=float, default=1.0)
+    ap.add_argument("--to", default="", help="CSS selectors to scroll to, one per leg")
     ap.add_argument("--hover", default="", help="mouse x positions to move through, one per leg")
     ap.add_argument("--settle-ms", type=int, default=800)
     args = ap.parse_args()
