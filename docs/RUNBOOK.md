@@ -123,10 +123,24 @@ Script errors from phones appear as `client error: <message> | <user agent>`.
 | Show me says "I can't see it" with no photo | Procedure captured before expert photos existed | Re-capture it |
 | Spend near the cap | Live watching uses SAM about every second | Budget guard turns watching off at 95%; raise `BUDGET_USD` only deliberately |
 
+## The public link (Modal)
+
+https://prabindersinghh--ustad-web.us-east.modal.run. Runs without this laptop. Uses Modal's CLI (`pip install modal`, in its
+own environment, not the project's):
+
+    modal deploy deploy/modal_app.py          # ship code changes (about 1 min)
+    python deploy/modal_setup.py              # after changing .env settings
+    modal app logs ustad                      # what the server is doing
+    modal app stop ustad                      # stop paying: do this after judging
+
+Costs about $0.06 an hour while up. `python deploy/modal_setup.py --seed`
+**overwrites the cloud's data** with the chosen jobs from the laptop: don't run
+it once real runs exist there.
+
 ## Deadline checklist
 
-- [ ] Remove test procedures from the list
+- [x] Test procedures left out of the cloud copy (the laptop's list is unchanged)
 - [ ] Repo **public** (GitHub, Settings, Danger zone) before Nov 5, 6:30 AM IST
-- [ ] Stable demo URL that doesn't need this laptop on
+- [x] Stable demo URL that doesn't need this laptop on: https://prabindersinghh--ustad-web.us-east.modal.run
 - [ ] 3 minute video
 - [ ] Submission form

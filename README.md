@@ -1,5 +1,7 @@
 # Ustad
 
+**Live demo:** https://prabindersinghh--ustad-web.us-east.modal.run
+
 **An AI copilot for industrial technicians that learns a procedure by watching an expert do it once, then guides and verifies every worker after that.**
 
 > **Developers and coding agents:** start with [AGENTS.md](AGENTS.md). Current state, timeline, architecture and decisions are in [docs/](docs/).

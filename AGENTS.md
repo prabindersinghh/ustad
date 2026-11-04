@@ -34,6 +34,9 @@ developer or coding agent. Read it fully before touching code.
 - **Safety steps are never skipped by inference.** Lockout, readings, timers
   and confirm steps must be done explicitly. See `live.inferable()` and
   DECISIONS.md D-014. Do not weaken this.
+- **Public link.** https://prabindersinghh--ustad-web.us-east.modal.run runs on Modal from `deploy/`. Web and backend changes
+  reach it only after `modal deploy deploy/modal_app.py`. Never re-run
+  `modal_setup.py --seed` once real runs exist there: it overwrites them.
 - **Budget.** Hackathon credit is $150; the working cap is `BUDGET_USD=50`.
   Every model call is metered (`/api/usage`). Probes that call real models
   cost money: say so and keep them small.

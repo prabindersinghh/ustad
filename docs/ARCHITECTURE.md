@@ -37,6 +37,8 @@ lands here in the same commit.
 | `backend/improve.py` | Self-improving procedures: `propose` (run evidence to Spark, phrases SAM-checked on the expert photo) and `apply` (approved items become a new version). |
 | `backend/i18n.py` | Fixed phrases in English and Hindi, and the language rule added to model prompts. |
 | `backend/translate.py` | A procedure's spoken and on-screen words in the worker's language: one model call per version, cached in `translations`. Numbers are checked in code; a field that fails falls back to the original. |
+| `deploy/modal_app.py` | The public demo link: one always-on CPU container on Modal, restoring data from a Volume at start and backing up every 30 s. |
+| `deploy/modal_setup.py` | Stores `.env` settings as the Modal secret `ustad-env` (values never printed); `--seed` uploads a clean copy of the chosen demo jobs. |
 | `backend/db.py` | SQLite: procedures (versioned), procedure_history, proposals, sessions, step_events, usage. `step_insights` (with questions), `usage_summary`, `metrics` (checks only). |
 | `backend/main.py` | FastAPI app: REST endpoints, the two WebSockets (thin `_pump` dispatch), static files, dashboard, evidence page. |
 | `web/index.html` | Landing page plus the app screens (home, capture, library, guide, report). |

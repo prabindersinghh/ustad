@@ -30,6 +30,7 @@ approval makes a new version.
 
 | Capability | Evidence |
 |---|---|
+| Permanent public link, no laptop needed: https://prabindersinghh--ustad-web.us-east.modal.run | Public address 2026-11-04: real job, browser job, data survives a redeploy. Not yet tried on an iPhone |
 | Hindi guide: spoken and on-screen steps, verdicts and answers; Hindi voice commands; numbers checked in code | Real models on the user's job 2026-11-04; browser at phone size; 40 tests |
 | Guiding is fast: about 7 s per step from the finished state to the next instruction (was 11.5 to 30 s), on the user's real job; instant answer to "what do I do" | Real models 2026-11-04 01:30, same photos old vs new; tests |
 | Run any procedure again from the dashboard (link, QR, copy) or from the report | Browser 2026-11-04 |
@@ -60,14 +61,15 @@ approval makes a new version.
 - **Hindi on a real phone with a real voice.** Speech was tested on synthetic
   Hindi audio, on-device speech in a desktop browser. Not yet: an iPhone's
   Hindi voice, a real worker's accent, factory noise.
-- **Muse Glimmer on Modal.** Login done; Modal refuses any GPU until the user
-  adds a payment method.
+- **Muse Glimmer.** Never run. Modal refuses any GPU without a card, which the
+  user doesn't have; the landing page's on-premise tier is a design, not a tested setup.
 
 ## Known issues
 
 | Issue | Impact | Plan |
 |---|---|---|
-| Public URL is a Cloudflare *quick* tunnel: random name, dies on restart | Link changes | Named tunnel or ngrok static domain (user to choose) |
+| A restart of the Modal container loses up to 30 s of data and any capture take in progress | Rare. The guide resumes from saved steps; a take must be recorded again | Acceptable for the demo |
+| The laptop and the Modal link keep separate databases and separate spend counts | The budget guard sees each one's own spend. Check Meta's billing for the true total | Use the Modal link from now on |
 | An explicit "done" check took about 6.8 s median on 2026-11-03 (2.4 s measured on 11-02 with smaller frames) | Slower tap-to-verdict | Background auto-advance usually beats the tap. Re-measure; consider `minimal` for taps with a fresh grounding |
 | Ask answers take about 3.3 s (`minimal`) | A pause before the answer | "Thinking" shown on screen. Acceptable for now |
 | Server restart loses an in-progress capture take (state in memory; frames on disk are cleared at start) | Phone shows "server restarted, record again" | Persist takes to disk if it matters |
@@ -77,6 +79,6 @@ approval makes a new version.
 ## Next up (see ROADMAP.md)
 
 1. User: factory demo and video; share the factory media for the landing page.
-2. Working link for judges: needs a host the laptop doesn't have to stay on for.
-3. Glimmer on Modal once a payment method is added.
+2. iPhone run on the Modal link.
+3. Glimmer: no card, so a per-token host needs the user's account and key.
 4. Remove test procedures just before submitting · **make the repo public**.
