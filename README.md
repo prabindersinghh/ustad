@@ -20,7 +20,7 @@
 <p align="center">
   <img src="docs/media/glasses-view.gif" alt="Concept view through glasses: Ustad shows the step, boxes the part, verifies the work and warns about the print head, over real factory footage" width="680" />
   <br />
-  <sub>Concept view over real factory footage: how Ustad could look through glasses with a display. Not tested on glasses yet. Today it runs on a phone.</sub>
+  <sub>Concept view over real factory footage: how Ustad could look through glasses with a display, with boxes placed for illustration. Not tested on glasses yet. Today it runs on a phone.</sub>
 </p>
 
 Built for the Meta Global AI Developer Hackathon 2026: Indie Developer track, *Push the Frontier*.

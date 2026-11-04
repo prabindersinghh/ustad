@@ -8,64 +8,71 @@
 <style>
 
 html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
-#fit { position: absolute; left: 0; top: 0; width: 1100px; height: 600px; transform-origin: 0 0; font-family: Figtree, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; overflow: hidden; background: #fff; }
+#fit { position: absolute; left: 0; top: 0; width: 1100px; height: 600px; transform-origin: 0 0; font-family: Figtree, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; overflow: hidden; background: #fff; --c: #9fb0d0; }
 
-/* The same clip behind each lens. The nose bridge hides that they do not join. */
-#world, #world2 { position: absolute; top: -280px; width: 673px; height: 1055px; object-fit: fill; background: #0f1830; }
-#world { left: -123px; }
-#world2 { left: 405px; clip-path: inset(0 0 0 145px); }
+/* One colour for each state, the same ones the phone app uses. */
+#fit.step, #fit.check, #fit.next { --c: #3b82ff; }
+#fit.show { --c: #f5b83d; }
+#fit.ok { --c: #12c97f; }
+#fit.warn { --c: #ff4d52; }
 
-/* The right lens is the display: tinted glass, coloured by what is happening. */
-#tint { position: absolute; left: 600px; top: 90px; width: 460px; height: 450px; background: rgba(10, 16, 32, .8); transition: background .25s ease; }
-.step #tint, .check #tint, .next #tint { background: rgba(26, 86, 224, .86); }
-.ok #tint { background: rgba(14, 134, 88, .88); }
-.warn #tint { background: rgba(214, 48, 54, .92); }
+/* Both lenses stay clear. The left lens is the video; the right is the same picture,
+   a little to the side as a second eye sees it, copied onto a canvas. */
+#world { position: absolute; left: -99px; top: -215px; width: 600px; height: 940px; object-fit: fill; background: #0f1830; }
+#world2 { position: absolute; left: 600px; top: 90px; width: 460px; height: 450px; background: #0f1830; }
+#fx { position: absolute; left: 0; top: 0; width: 1100px; height: 600px; }
+#frame, #rims { position: absolute; inset: 0; }
+#rims g { stroke: var(--c); transition: stroke .3s ease; }
 
-#frame { position: absolute; inset: 0; }
 .hud { position: absolute; opacity: 0; transition: opacity .25s ease; }
-.on .hud.show-on, .boot .only-boot, .step .only-step, .check .only-check, .ok .only-ok, .warn .only-warn, .next .only-next { opacity: 1; }
+.boot .only-boot, .step .only-step, .show .only-show, .check .only-check, .ok .only-ok, .warn .only-warn, .next .only-next { opacity: 1; }
 
 #tag { left: 0; top: 14px; width: 1100px; text-align: center; font-size: 26px; font-weight: 700; color: #1a56e0; opacity: 1; }
 
-.pill { left: 630px; width: 400px; top: 136px; text-align: center; font-size: 26px; font-weight: 700; }
-.pill i { display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 9px; background: #fff; vertical-align: 2px; }
+/* Ustad's words: one small dark card, with the work visible around it. */
+.card { left: 662px; top: 258px; width: 336px; box-sizing: border-box; padding: 12px 16px 15px; border-radius: 14px; background: rgba(10, 16, 32, .84); }
+.meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 19px; font-weight: 600; color: #b9c6e4; }
+.meta em { font-style: normal; color: #fff; }
+.meta i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; background: var(--c); vertical-align: 2px; transition: background .3s ease; }
+.card b { display: block; font-size: 32px; line-height: 1.16; font-weight: 700; letter-spacing: -.005em; }
 
-.say { left: 648px; top: 190px; width: 364px; text-align: center; }
-.say small { display: block; font-size: 24px; font-weight: 700; color: rgba(255, 255, 255, .86); margin-bottom: 8px; }
-.say b { display: block; font-size: 42px; line-height: 1.12; font-weight: 800; }
+.voice { left: 830px; transform: translateX(-50%); white-space: nowrap; padding: 6px 13px; border-radius: 9px; background: rgba(10, 16, 32, .84); font-size: 21px; font-weight: 700; }
+.voice span { margin-right: 7px; font-weight: 600; color: #b9c6e4; }
+.voice.only-check { top: 402px; }
+.voice.only-show { top: 316px; }
 
-#voice { left: 700px; top: 392px; width: 260px; text-align: center; font-size: 34px; font-weight: 700; }
-#voice small { display: block; font-size: 21px; font-weight: 600; color: rgba(255, 255, 255, .86); margin-bottom: 2px; }
+/* "Show me": the expert's own photo with the part boxed, framed in gold as in the app. */
+#ref { left: 690px; top: 126px; width: 280px; margin: 0; border-radius: 12px; overflow: hidden; border: 2px solid #f5b83d; background: rgba(10, 16, 32, .9); }
+#ref .img { position: relative; line-height: 0; overflow: hidden; }
+#ref img { display: block; width: 100%; height: auto; }
+#ref .mark { position: absolute; border: 2px solid #f5b83d; border-radius: 6px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .28); left: 24.3%; top: 11.4%; width: 51.8%; height: 77.1%; }
+#ref figcaption { padding: 6px 10px 8px; text-align: center; font-size: 19px; font-weight: 700; color: #ffe3a3; }
 
-/* Target boxes stay on the part, in the left lens. */
-.box { left: 181px; top: 334px; width: 197px; height: 128px; border: 4px solid #fff; border-radius: 12px; outline: 3px solid #1a56e0; }
-.box.good { outline-color: #12a06a; }
-.box span { position: absolute; left: -24px; top: -46px; white-space: nowrap; background: #1a56e0; font-size: 24px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
-.box.good span { background: #12a06a; }
-.haz { left: 171px; top: 176px; width: 178px; height: 119px; border: 4px solid #fff; outline: 3px solid #e5484d; border-radius: 12px; }
-.haz span { position: absolute; left: -24px; bottom: -46px; white-space: nowrap; background: #e5484d; font-size: 24px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
+#sam { left: 270px; top: 120px; transform: translateX(-50%); white-space: nowrap; padding: 5px 12px; border-radius: 9px; background: rgba(10, 16, 32, .84); font-size: 19px; font-weight: 600; }
+#sam i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; background: #f5b83d; vertical-align: 2px; }
 </style>
 </head>
 <body>
 <div id="fit" class="boot">
   <video id="world" src="../assets/factory/glasses-view.mp4" muted loop playsinline autoplay preload="auto"></video>
-  <video id="world2" src="../assets/factory/glasses-view.mp4" muted loop playsinline autoplay preload="auto" aria-hidden="true"></video>
-  <div id="tint"></div>
+  <canvas id="world2" width="460" height="450" aria-hidden="true"></canvas>
+  <canvas id="fx" aria-hidden="true"></canvas>
 
-  <div class="hud pill only-step only-next"><i></i>Watching</div>
-  <div class="hud pill only-check"><i></i>Checking</div>
-  <div class="hud pill only-ok"><i></i>Verified</div>
+  <div id="sam" class="hud only-show"><i></i>SAM 3.1 finding objects</div>
 
-  <div class="hud box only-step only-check"><span>blue plastic part</span></div>
-  <div class="hud box good only-ok"><span>blue plastic part: seated</span></div>
-  <div class="hud haz only-warn"><span>Keep clear: print head</span></div>
+  <div class="hud card only-boot"><div class="meta"><span>Ustad</span><em><i></i>Starting</em></div><b>Starting the job.</b></div>
+  <div class="hud card only-step"><div class="meta"><span>Step 2 of 4</span><em><i></i>Watching</em></div><b>Place a blue part onto the fixture.</b></div>
+  <div class="hud card only-check"><div class="meta"><span>Step 2 of 4</span><em><i></i>Checking</em></div><b>Place a blue part onto the fixture.</b></div>
+  <div class="hud card only-ok"><div class="meta"><span>Step 2 of 4</span><em><i></i>Verified</em></div><b>That's right.<br />Next step.</b></div>
+  <div class="hud card only-warn"><div class="meta"><span>Keep clear</span><em><i></i>Safety</em></div><b>Hand near<br />the print head.</b></div>
+  <div class="hud card only-next"><div class="meta"><span>Step 3 of 4</span><em><i></i>Watching</em></div><b>Press the blue part firmly down.</b></div>
 
-  <div class="hud say only-boot"><small>Ustad</small><b>Starting the job.</b></div>
-  <div class="hud say only-step only-check"><small>Step 2 of 4</small><b>Place a blue part onto the fixture.</b></div>
-  <div class="hud say only-ok"><small>Step 2 verified</small><b>That's right.<br />Next step.</b></div>
-  <div class="hud say only-warn"><small>Safety</small><b>Hand near the print head.<br />Keep clear.</b></div>
-  <div class="hud say only-next"><small>Step 3 of 4</small><b>Press the blue part firmly down.</b></div>
-  <div id="voice" class="hud only-check only-ok"><small>The worker says</small>"Done."</div>
+  <figure id="ref" class="hud only-show">
+    <div class="img"><img src="../assets/factory/glasses-ref.jpg" alt="" width="560" height="280" /><span class="mark"></span></div>
+    <figcaption>Expert's view · step 2</figcaption>
+  </figure>
+  <div class="hud voice only-show"><span>The worker says</span>"Show me."</div>
+  <div class="hud voice only-check"><span>The worker says</span>"Done."</div>
 
   <svg id="frame" viewBox="0 0 1100 600" aria-hidden="true">
     <defs>
@@ -84,10 +91,7 @@ html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
         <path transform="matrix(-1 0 0 1 1100 0)" d="M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
       </clipPath>
       <path id="surround" fill="#fff" fill-rule="evenodd" d="M0 0H551V600H0Z M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
-      <g id="half">
-        <path fill="url(#acetate)" fill-rule="evenodd" d="M0 98C70 82 160 66 270 64C360 62 432 76 480 102C506 116 530 122 551 122V200C526 200 512 216 506 248C494 326 468 404 414 474C372 528 300 560 214 560C130 560 86 524 62 444C42 376 34 284 30 214C28 190 14 172 0 166Z M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
-        <path fill="none" stroke="#3d414d" stroke-width="2.5" d="M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
-      </g>
+      <path id="half" fill="url(#acetate)" fill-rule="evenodd" d="M0 98C70 82 160 66 270 64C360 62 432 76 480 102C506 116 530 122 551 122V200C526 200 512 216 506 248C494 326 468 404 414 474C372 528 300 560 214 560C130 560 86 524 62 444C42 376 34 284 30 214C28 190 14 172 0 166Z M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
     </defs>
     <!-- White first, then black over both, so no white shows at the centre join. -->
     <use href="#surround" />
@@ -95,7 +99,7 @@ html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
     <use href="#half" />
     <use href="#half" transform="matrix(-1 0 0 1 1100 0)" />
     <!-- A faint reflection, running the same way across both lenses. -->
-    <path fill="#fff" opacity=".045" clip-path="url(#lensClip)" d="M120 90H250L90 560H-40Z M290 90H336L176 560H130Z M690 90H820L660 560H530Z M860 90H906L746 560H700Z" />
+    <path fill="#fff" opacity=".04" clip-path="url(#lensClip)" d="M120 90H250L90 560H-40Z M290 90H336L176 560H130Z M690 90H820L660 560H530Z M860 90H906L746 560H700Z" />
     <!-- Capture light on one corner, camera on the other. -->
     <circle cx="36" cy="132" r="6.5" fill="#f4f7ff" />
     <circle cx="36" cy="132" r="11" fill="none" stroke="#f4f7ff" stroke-opacity=".28" stroke-width="2" />
@@ -104,46 +108,167 @@ html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
     <circle cx="1061" cy="129" r="2.2" fill="#fff" opacity=".85" />
   </svg>
 
+  <!-- A thin line on each lens rim shows the state, like the screen edge on the phone. -->
+  <svg id="rims" viewBox="0 0 1100 600" aria-hidden="true">
+    <defs><path id="rim" d="M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" /></defs>
+    <g fill="none" stroke-width="3"><use href="#rim" /><use href="#rim" transform="matrix(-1 0 0 1 1100 0)" /></g>
+  </svg>
+
   <div id="tag" class="hud">Concept view through Meta glasses</div>
 </div>
 <script>
   const fit = document.getElementById('fit');
   const world = document.getElementById('world');
-  const world2 = document.getElementById('world2');
-  const PHASES = [[0, 'boot'], [1.2, 'step'], [5.5, 'check'], [7, 'ok'], [9.6, 'warn'], [13, 'next']];
+  const eye2 = document.getElementById('world2').getContext('2d');
+  const fxEl = document.getElementById('fx');
+  const fx = fxEl.getContext('2d');
+
+  // The warning comes when the hand really is in view, 12 s into the clip.
+  const PHASES = [[0, 'boot'], [1.2, 'step'], [3.2, 'show'], [5.5, 'check'], [7, 'ok'], [9.6, 'next'], [12, 'warn'], [14.6, 'next']];
+  const COLOR = { target: '#3b82ff', gold: '#f5b83d', good: '#12c97f', danger: '#ff4d52' };
+
+  // Where the part, print head and hand are in the clip (source pixels, 8 samples a
+  // second), from colour tracking for this concept. These are not model detections.
+  const TRACK = {"rate":8,"part":[[224,420,145,108],[213,413,145,108],[202,408,145,108],[212,414,145,108],[221,420,145,108],[230,427,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[232,430,145,108],[233,432,145,108],[234,433,145,108],[234,433,145,108],[233,432,145,108],[232,430,145,108],[231,430,145,108],[231,430,145,108],[230,430,145,108],[228,432,145,108],[223,434,145,108],[213,439,145,108],[203,444,145,108],[194,448,145,108],[191,450,145,108],[196,448,145,108],[212,441,145,108],[227,434,145,108],[236,429,145,108],[236,427,145,108],[224,420,145,108],[213,413,145,108],[202,408,145,108],[212,414,145,108],[221,420,145,108],[230,427,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[232,430,145,108],[233,432,145,108],[234,433,145,108],[234,433,145,108],[233,432,145,108],[232,430,145,108],[231,430,145,108],[231,430,145,108],[230,430,145,108],[228,432,145,108],[223,434,145,108],[213,439,145,108],[203,444,145,108],[194,448,145,108],[191,450,145,108],[196,448,145,108],[212,441,145,108],[227,434,145,108],[236,429,145,108],[236,427,145,108],[224,420,145,108],[213,413,145,108],[202,408,145,108],[212,414,145,108],[221,420,145,108],[230,427,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[232,430,145,108],[233,432,145,108],[234,433,145,108],[234,433,145,108],[233,432,145,108],[232,430,145,108],[231,430,145,108],[231,430,145,108],[230,430,145,108],[228,432,145,108],[223,434,145,108],[213,439,145,108],[203,444,145,108],[194,448,145,108],[191,450,145,108],[196,448,145,108],[212,441,145,108],[227,434,145,108],[236,429,145,108],[236,427,145,108],[224,420,145,108],[213,413,145,108],[202,408,145,108],[212,414,145,108],[221,420,145,108],[230,427,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[230,428,145,108],[232,430,145,108],[233,432,145,108],[234,433,145,108],[234,433,145,108],[233,432,145,108],[232,430,145,108],[231,430,145,108],[231,430,145,108],[230,430,145,108],[228,432,145,108],[223,434,145,108],[213,439,145,108],[203,444,145,108],[194,448,145,108],[191,450,145,108],[196,448,145,108],[212,441,145,108],[227,434,145,108],[236,429,145,108],[236,427,145,108]],"head":[[156,326,98,98],[157,326,111,98],[164,326,114,98],[168,330,110,100],[174,334,114,101],[178,339,120,102],[186,344,118,100],[190,348,117,102],[198,353,122,103],[206,360,128,104],[212,364,122,107],[213,366,131,106],[213,391,131,106],[213,391,131,106],[212,391,132,106],[212,390,132,104],[212,376,133,105],[212,368,133,104],[212,366,133,104],[208,362,133,106],[191,350,119,104],[178,341,118,101],[168,334,117,104],[158,328,108,102],[146,328,101,102],[146,328,100,102],[146,340,100,94],[146,346,100,92],[148,346,98,92],[148,346,98,92],[148,338,99,95],[148,328,100,98],[148,328,102,98],[152,328,104,98],[160,328,108,98],[166,333,109,100],[170,340,113,96],[176,344,114,104],[182,349,118,103],[186,352,119,104],[194,356,124,104],[199,362,125,104],[206,366,128,106],[210,369,132,107],[214,388,128,104],[214,398,128,106],[214,398,129,106],[214,398,129,106],[214,388,132,108],[214,378,132,106],[214,372,132,106],[214,372,132,106],[200,362,128,102],[187,352,120,103],[176,344,115,102],[168,337,111,103],[154,330,108,100],[153,330,100,100],[148,330,105,100],[148,350,104,94],[148,350,102,94],[148,350,100,94],[148,345,99,97],[146,338,101,96],[148,327,99,97],[148,327,99,97],[156,327,102,97],[162,332,103,98],[170,338,106,100],[176,344,110,98],[184,348,112,102],[188,350,116,104],[196,357,116,101],[204,363,116,103],[212,369,127,103],[218,372,123,105],[218,386,128,104],[218,400,130,104],[218,400,130,106],[218,400,130,106],[218,396,131,110],[218,385,131,107],[218,375,131,105],[218,374,131,106],[210,367,128,107],[198,358,122,101],[182,346,120,102],[176,342,117,105],[162,333,106,99],[155,333,100,99],[155,333,99,99],[155,342,98,96],[156,356,96,91],[156,356,96,91],[156,356,96,91],[156,349,96,95],[156,338,96,96],[156,336,101,96],[160,336,102,96],[165,336,103,96],[174,341,106,99],[181,345,109,99],[188,349,108,101],[193,352,114,102],[198,358,118,100],[208,364,112,102],[214,368,106,107],[220,372,122,104],[220,379,128,103],[220,400,128,102],[222,400,126,104],[222,400,126,104],[222,400,126,104],[222,390,126,104],[222,380,126,104],[222,377,124,104],[218,374,128,104],[206,365,116,103],[190,354,116,102],[180,347,113,101],[168,338,106,100],[156,338,102,95],[154,338,101,95],[154,339,98,94],[154,354,98,95],[156,354,96,96],[156,354,96,96],[156,350,96,100]],"hand":[[304,460,146,74],[280,474,170,77],[280,494,170,86],[280,494,170,86],[280,496,170,84],[349,498,101,58],[411,496,39,49],null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[370,428,80,56],[351,428,99,62],[328,434,122,60],[318,436,132,60],[306,446,144,56],[299,450,151,60],[292,453,158,60],[288,454,162,60],[288,455,162,61],[288,464,162,62],[290,466,160,64],[293,466,157,64],[296,466,154,64],[324,456,126,60],[370,428,80,60],null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[382,412,68,57],[366,414,84,58],[358,418,92,60],[340,420,110,64],[324,430,126,62],[309,442,141,61],[292,446,158,68],[286,454,164,65],[286,464,164,63],[286,470,164,64],[292,472,158,64],[296,472,154,64],[304,472,146,64],[326,461,124,62],[366,430,84,62],[392,430,58,52],[392,430,58,33],[395,434,55,29],null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,[384,436,66,35],[378,438,72,56],[362,438,88,57],[346,442,104,58],[329,449,121,61],[328,464,122,58],[328,464,122,62],[328,464,122,62],[346,470,104,58],[352,470,98,60],[383,492,67,50],[390,496,60,50],[396,500,54,48],[396,504,54,45],[396,504,54,46],[379,506,71,72],[351,508,99,102],[351,507,99,103],[351,507,99,103],[391,507,59,103],null,null,null,null,null,null,null,null,null,null,[380,444,70,38],[380,444,70,38],[350,448,100,40],[348,448,102,48],[346,438,104,58],[346,438,104,58],[346,438,104,58],[346,438,104,58]]};
+
   function phaseAt(t) {
-    let name = PHASES[0][1];
-    for (const [at, p] of PHASES) if (t >= at) name = p;
-    return name;
+    let at = 0, name = 'boot';
+    for (const [a, p] of PHASES) if (t >= a) { at = a; name = p; }
+    return { name, since: t - at };
   }
-  function paint(t) { fit.className = phaseAt(t); }
-  function size() { fit.style.transform = 'scale(' + (innerWidth / 1100) + ')'; }
-  addEventListener('resize', size);
+
+  const SX = 1.25, SY = 1.25, OX = -99, OY = -215;
+  const EYE_SHIFT = 532.75; // from a point in the left lens to the same point in the right
+  function track(name, t) {
+    const a = TRACK[name], f = (t * TRACK.rate) % a.length, i = Math.floor(f), k = f - i;
+    const p = a[i], q = a[(i + 1) % a.length];
+    if (!p || !q) return null;
+    const v = p.map((x, n) => x + (q[n] - x) * k);
+    return { x: v[0] * SX + OX, y: v[1] * SY + OY, w: v[2] * SX, h: v[3] * SY };
+  }
+
+  function round(ctx, x, y, w, h, r) {
+    ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  // A small dark label with a coloured dot, not a filled colour tag.
+  function label(text, b, color) {
+    fx.font = '600 20px Figtree, sans-serif';
+    const w = fx.measureText(text).width + 36, h = 30;
+    const x = Math.max(84, Math.min(b.x, 458 - w)), y = b.y - h - 7;
+    fx.fillStyle = 'rgba(10,16,32,.84)'; round(fx, x, y, w, h, 7); fx.fill();
+    fx.fillStyle = color; fx.beginPath(); fx.arc(x + 14, y + h / 2, 4.5, 0, 7); fx.fill();
+    fx.fillStyle = '#fff'; fx.textBaseline = 'middle'; fx.fillText(text, x + 26, y + h / 2 + 1);
+  }
+
+  // Fine corner brackets, as the phone draws them, with a short lock-on.
+  function lock(b, color, since, text) {
+    const k = Math.min(1, since / 0.25), e = 1 - (1 - k) * (1 - k), grow = (1 - e) * 12;
+    const x = b.x - grow, y = b.y - grow, w = b.w + grow * 2, h = b.h + grow * 2, L = Math.min(w, h) * 0.2;
+    fx.globalAlpha = e;
+    fx.strokeStyle = color; fx.lineCap = 'round'; fx.lineWidth = 3;
+    fx.beginPath();
+    fx.moveTo(x, y + L); fx.lineTo(x, y); fx.lineTo(x + L, y);
+    fx.moveTo(x + w - L, y); fx.lineTo(x + w, y); fx.lineTo(x + w, y + L);
+    fx.moveTo(x + w, y + h - L); fx.lineTo(x + w, y + h); fx.lineTo(x + w - L, y + h);
+    fx.moveTo(x + L, y + h); fx.lineTo(x, y + h); fx.lineTo(x, y + h - L);
+    fx.stroke();
+    if (text) label(text, b, color);
+    fx.globalAlpha = 1;
+  }
+
+  // Hazards are dashed, as in the app.
+  function hazard(b, since, alarm, t) {
+    const e = Math.min(1, since / 0.25);
+    fx.globalAlpha = e * (alarm ? 0.7 + 0.3 * Math.abs(Math.sin(t * 5)) : 0.9);
+    fx.strokeStyle = COLOR.danger; fx.lineWidth = 2.5; fx.setLineDash([10, 7]);
+    round(fx, b.x, b.y, b.w, b.h, 8); fx.stroke();
+    fx.setLineDash([]); fx.globalAlpha = e;
+    label('Keep clear: print head', b, COLOR.danger);
+    fx.globalAlpha = 1;
+  }
+
+  // One thin line passing down the left lens while Ustad looks.
+  function scan(since, duration) {
+    if (since > duration) return;
+    const y = 104 + (since / duration) * 424;
+    const tail = fx.createLinearGradient(0, y - 44, 0, y);
+    tail.addColorStop(0, 'rgba(255,255,255,0)'); tail.addColorStop(1, 'rgba(255,255,255,.14)');
+    fx.fillStyle = tail; fx.fillRect(40, y - 44, 460, 44);
+    fx.strokeStyle = 'rgba(255,255,255,.8)'; fx.lineWidth = 1.5;
+    fx.beginPath(); fx.moveTo(40, y); fx.lineTo(500, y); fx.stroke();
+  }
+
+  function flash(color, since) {
+    if (since > 0.7) return;
+    fx.globalAlpha = 0.14 * (1 - since / 0.7); fx.fillStyle = color;
+    fx.fillRect(40, 90, 460, 450); fx.fillRect(600, 90, 460, 450); fx.globalAlpha = 1;
+  }
+
+  function overlays(t, name, since) {
+    fx.clearRect(0, 0, 1100, 600);
+    const part = track('part', t), head = track('head', t), hand = track('hand', t);
+    if (name === 'step' || name === 'next') lock(part, COLOR.target, since, 'blue plastic part');
+    if (name === 'show') {
+      scan(since, 1.2);
+      if (since > 0.5) hazard(head, since - 0.5, false, t);
+      if (since > 0.9) lock(part, COLOR.gold, since - 0.9, 'blue plastic part');
+    }
+    if (name === 'check') { scan(since, 1.4); lock(part, COLOR.target, 1, 'blue plastic part'); }
+    if (name === 'ok') { lock(part, COLOR.good, since, 'blue plastic part: seated'); flash(COLOR.good, since); }
+    if (name === 'warn') {
+      hazard(head, since, true, t);
+      // The right lens sees further that way, so the hand is marked there.
+      if (hand) { fx.save(); fx.translate(EYE_SHIFT, 0); lock(hand, COLOR.danger, since, 'hand'); fx.restore(); }
+      flash(COLOR.danger, since);
+    }
+  }
+
+  function paint(t) {
+    const { name, since } = phaseAt(t);
+    if (fit.className !== name) fit.className = name;
+    if (world.readyState >= 2) eye2.drawImage(world, 133, 244, 347, 360, 0, 0, 434, 450);
+    overlays(t, name, since);
+  }
+
+  function size() {
+    const scale = innerWidth / 1100, k = Math.min(2, scale * (devicePixelRatio || 1));
+    fit.style.transform = 'scale(' + scale + ')';
+    fxEl.width = Math.round(1100 * k); fxEl.height = Math.round(600 * k);
+    fx.setTransform(k, 0, 0, k, 0, 0);
+  }
+  addEventListener('resize', () => { size(); paint(world.currentTime); });
   size();
+
+  // For stills and for making the README animation, frame by frame.
+  window.seekTo = (t) => new Promise((done) => {
+    world.pause();
+    world.onseeked = () => { world.onseeked = null; paint(t); done(); };
+    world.currentTime = t;
+  });
+
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const param = new URLSearchParams(location.search).get('t');
   if (param !== null || still) {
-    [world, world2].forEach((v) => { v.removeAttribute('autoplay'); v.pause(); });
-    paint(param !== null ? +param : 8);
+    world.removeAttribute('autoplay');
+    world.pause();
+    const hold = param !== null ? +param : 8;
+    const start = () => window.seekTo(hold);
+    if (world.readyState >= 1) start(); else world.addEventListener('loadedmetadata', start, { once: true });
   } else {
+    // If the browser refuses to play (an iPhone in Low Power Mode), the words still advance.
+    let stuck = false;
+    const t0 = performance.now();
+    let last = -1;
     (function tick() {
-      paint(world.currentTime);
-      // The second lens follows the first; it only needs to stay roughly together.
-      if (!world2.seeking && Math.abs(world2.currentTime - world.currentTime) > 0.25) world2.currentTime = world.currentTime;
+      const t = stuck ? ((performance.now() - t0) / 1000) % 16 : world.currentTime;
+      if (t !== last) { last = t; paint(t); }
       requestAnimationFrame(tick);
     })();
-    world.play().catch(() => {});
-    world2.play().catch(() => {});
+    world.play().catch(() => { stuck = true; });
   }
-  // For making the README animation, frame by frame.
-  window.seekTo = (t) => {
-    paint(t);
-    return Promise.all([world, world2].map((v) => new Promise((done) => {
-      v.pause();
-      v.onseeked = () => { v.onseeked = null; done(); };
-      v.currentTime = t;
-    })));
-  };
+  document.fonts && document.fonts.ready.then(() => paint(world.currentTime));
 </script>
 </body>
 </html>
