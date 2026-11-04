@@ -37,7 +37,7 @@ lands here in the same commit.
 | `backend/improve.py` | Self-improving procedures: `propose` (run evidence to Spark, phrases SAM-checked on the expert photo) and `apply` (approved items become a new version). |
 | `backend/i18n.py` | Fixed phrases in English and Hindi, and the language rule added to model prompts. |
 | `backend/translate.py` | A procedure's spoken and on-screen words in the worker's language: one model call per version, cached in `translations`. Numbers are checked in code; a field that fails falls back to the original. |
-| `backend/second_opinion.py` | After a job, on a supervisor's request: each step's evidence photo through `judge_step` again on the open-weights model (`force_open`, no fallback), saved to `second_opinions` with the model id. Background thread, one at a time. |
+| `backend/second_opinion.py` | After a job, on a supervisor's request: each step's evidence photo through `judge_step` again on the open-weights model (`force_open`, no fallback), saved to `second_opinions` with the model id. Background thread, one at a time. Can take only the doubtful steps (`doubtful_steps`, `DOUBT_CONFIDENCE`). |
 | `deploy/modal_app.py` | The public demo link: one always-on CPU container on Modal, restoring data from a Volume at start and backing up every 30 s. |
 | `deploy/modal_setup.py` | Stores `.env` settings as the Modal secret `ustad-env` (values never printed); `--seed` uploads a clean copy of the chosen demo jobs. |
 | `backend/db.py` | SQLite: procedures (versioned), procedure_history, proposals, sessions, step_events, usage. `step_insights` (with questions), `usage_summary`, `metrics` (checks only). |
@@ -249,8 +249,8 @@ chunks.
 | `GET /api/procedures/{id}/improve` | The latest proposal and the version history. |
 | `POST /api/procedures/{id}/improve` | Ask Spark for improvements. Supervisor token; 409 with no runs; 429 past 6 per 10 min. |
 | `POST /api/procedures/{id}/proposals/{prid}/apply {accept: [i]}` | Apply the approved items as a new version. Supervisor token; 409 if stale or handled. |
-| `GET /api/sessions/{sid}/second-opinion` | What the open-weights model said about this job, whether it's available and running. |
-| `POST /api/sessions/{sid}/second-opinion` | Start it. Supervisor token; 3 per 10 min; 409 if not configured, nothing to check, or another is running. |
+| `GET /api/sessions/{sid}/second-opinion` | What the open-weights model said about this job, whether it's available and running, how many doubtful steps can be checked and how many have no photo. |
+| `POST /api/sessions/{sid}/second-opinion` | Start it. `?scope=doubtful` checks only the doubtful steps; the default `all` checks every judged step. Supervisor token; 3 per 10 min; 400 on an unknown scope; 409 if not configured, nothing to check, or another is running. |
 | `GET /api/sessions` · `/api/sessions/{id}` | Session list, one session with events (with `detections`). |
 | `GET /api/sessions/{id}/pack` | Evidence pack data: session, the procedure as it was when the job ran, events. |
 | `GET /evidence?s=<id>` | The printable evidence pack page. |

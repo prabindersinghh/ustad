@@ -161,3 +161,128 @@ def test_unknown_job_and_job_without_photos(env):
     pid = db.save_procedure("Empty", steps=[{"index": 0, "title": "x", "instruction": "x"}])
     empty = db.start_session(pid, None, "guide", version=1)
     assert client.post(f"/api/sessions/{empty}/second-opinion", headers=h).status_code == 409
+
+
+# --- The edge-case review: only the doubtful steps. -------------------------
+
+@pytest.fixture
+def mixed(env, tmp_path):
+    """Step 0 clean, 1 low confidence, 2 second attempt, 3 failed, 4 a retry then
+    a pass, 5 only ever a retry (no photo), 6 a pass with no confidence recorded."""
+    client, _ = env
+    steps = [{"index": i, "title": f"Step {i}", "instruction": "x", "target_phrase": "lid",
+              "success_criteria": "closed"} for i in range(7)]
+    pid = db.save_procedure("Mixed job", steps=steps)
+    sid = db.start_session(pid, None, "guide", version=1)
+    for i in range(7):
+        (tmp_path / f"m{i}.jpg").write_bytes(b"\xff\xd8photo")
+
+    def photo(i):
+        return f"media/m{i}.jpg"
+
+    db.log_step_event(sid, 0, "pass", confidence=0.95, evidence_path=photo(0), attempt=1)
+    db.log_step_event(sid, 1, "pass", confidence=second_opinion.DOUBT_CONFIDENCE - 0.01, evidence_path=photo(1), attempt=1)
+    db.log_step_event(sid, 2, "pass", confidence=0.95, evidence_path=photo(2), attempt=2)
+    db.log_step_event(sid, 3, "fail", evidence_path=photo(3), attempt=1)
+    db.log_step_event(sid, 4, "retry", attempt=1)
+    db.log_step_event(sid, 4, "pass", confidence=0.95, evidence_path=photo(4), attempt=1)
+    db.log_step_event(sid, 5, "retry", attempt=1)
+    db.log_step_event(sid, 6, "pass", evidence_path=photo(6), attempt=1)
+    return client, sid
+
+
+def _start(client, sid, query=""):
+    return client.post(f"/api/sessions/{sid}/second-opinion{query}", headers={"X-Supervisor-Token": "tok"})
+
+
+def test_doubtful_scope_checks_only_the_doubtful_steps(mixed, monkeypatch):
+    client, sid = mixed
+    monkeypatch.setattr(meta_client, "_reason_open", lambda *a, **k: _result(_call("verify_step", PASS)))
+    r = _start(client, sid, "?scope=doubtful")
+    assert r.status_code == 200 and r.json()["steps"] == 4 and r.json()["scope"] == "doubtful"
+    _wait()
+    rows = client.get(f"/api/sessions/{sid}/second-opinion").json()["rows"]
+    assert [row["step_index"] for row in rows] == [1, 2, 3, 4]
+    assert all(row["model"] == MODEL for row in rows)
+
+
+def test_with_no_option_every_judged_step_is_still_checked(mixed, monkeypatch):
+    client, sid = mixed
+    monkeypatch.setattr(meta_client, "_reason_open", lambda *a, **k: _result(_call("verify_step", PASS)))
+    r = _start(client, sid)
+    assert r.status_code == 200 and r.json()["steps"] == 6 and r.json()["scope"] == "all"
+    _wait()
+    rows = client.get(f"/api/sessions/{sid}/second-opinion").json()["rows"]
+    assert [row["step_index"] for row in rows] == [0, 1, 2, 3, 4, 6]
+
+
+def test_status_counts_doubtful_steps_and_those_with_no_photo(mixed):
+    client, sid = mixed
+    data = client.get(f"/api/sessions/{sid}/second-opinion").json()
+    assert data["doubtful"] == 4 and data["doubtful_no_photo"] == 1
+    assert data["doubt_confidence"] == second_opinion.DOUBT_CONFIDENCE
+
+
+def test_exactly_at_the_threshold_is_not_doubtful():
+    events = [{"step_index": 0, "verdict": "pass", "attempt": 1, "confidence": second_opinion.DOUBT_CONFIDENCE}]
+    assert second_opinion.doubtful_steps(events) == set()
+
+
+def test_skipped_and_confirmed_steps_are_not_doubtful():
+    events = [{"step_index": 0, "verdict": "skipped", "attempt": 2, "confidence": 0.1},
+              {"step_index": 1, "verdict": "confirmed", "attempt": 3, "confidence": None}]
+    assert second_opinion.doubtful_steps(events) == set()
+
+
+def test_a_clean_job_has_nothing_doubtful_to_check(env, monkeypatch, tmp_path):
+    client, _ = env
+    monkeypatch.setattr(meta_client, "_reason_open", lambda *a, **k: pytest.fail("must not call the model"))
+    pid = db.save_procedure("Clean", steps=[{"index": 0, "title": "x", "instruction": "x"}])
+    sid = db.start_session(pid, None, "guide", version=1)
+    (tmp_path / "c.jpg").write_bytes(b"\xff\xd8photo")
+    db.log_step_event(sid, 0, "pass", confidence=0.99, evidence_path="media/c.jpg", attempt=1)
+    r = _start(client, sid, "?scope=doubtful")
+    assert r.status_code == 409 and "doubtful" in r.json()["detail"]
+
+
+def test_an_unknown_scope_is_refused(mixed, monkeypatch):
+    client, sid = mixed
+    monkeypatch.setattr(meta_client, "_reason_open", lambda *a, **k: pytest.fail("must not call the model"))
+    assert _start(client, sid, "?scope=everything").status_code == 400
+
+
+def test_doubtful_scope_needs_the_token(mixed, monkeypatch):
+    client, sid = mixed
+    monkeypatch.setattr(meta_client, "_reason_open", lambda *a, **k: pytest.fail("must not call the model"))
+    assert client.post(f"/api/sessions/{sid}/second-opinion?scope=doubtful").status_code == 401
+
+
+def test_doubtful_review_never_falls_back_and_leaves_the_record_alone(mixed, monkeypatch):
+    client, sid = mixed
+    before = db.session_log(sid)
+
+    def down(*a, **k):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(meta_client, "_reason_open", down)
+    monkeypatch.setattr(config, "OPEN_FALLBACK", True)
+    monkeypatch.setattr(meta_client, "client", lambda: pytest.fail("must not fall back to the hosted model"))
+    _start(client, sid, "?scope=doubtful")
+    _wait()
+    rows = client.get(f"/api/sessions/{sid}/second-opinion").json()["rows"]
+    assert rows and all(r["verdict"] is None and r["error"] == "RuntimeError" for r in rows)
+    assert db.session_log(sid) == before
+
+
+def test_only_one_runs_at_a_time_in_either_scope(mixed, monkeypatch):
+    client, sid = mixed
+    monkeypatch.setattr(second_opinion, "_running", "another-job")
+    assert _start(client, sid, "?scope=doubtful").status_code == 409
+
+
+def test_the_rate_gate_covers_the_doubtful_scope(mixed, monkeypatch):
+    client, sid = mixed
+    from backend import live, main
+    monkeypatch.setattr(main, "_second_opinion_gate", live._RateGate(0, 600.0))
+    monkeypatch.setattr(meta_client, "_reason_open", lambda *a, **k: pytest.fail("must not call the model"))
+    assert _start(client, sid, "?scope=doubtful").status_code == 429

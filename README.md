@@ -92,7 +92,7 @@ The verification reasoning already runs on **Muse Glimmer 30B**, Meta's open-wei
 | Muse Spark 1.3 (hosted) | 8/8 | 0 | 4.6 s |
 | Muse Glimmer 30B (NVIDIA's free API) | 8/8 | 0 | 63 s |
 
-A worker can't wait a minute per step, so today Glimmer gives a **second opinion after the job**: press the button on an evidence pack, and each step's photo is judged again, with the model id recorded next to the first verdict. A failed call is recorded as a failure, never answered by another model.
+A worker can't wait a minute per step, so today Glimmer gives a **second opinion after the job**: press the button on an evidence pack, and each step's photo is judged again, with the model id recorded next to the first verdict. A failed call is recorded as a failure, never answered by another model. A second button sends only the doubtful steps: a failed or unclear check, more than one attempt, or low confidence. That option is tested with mocked models, and has not yet been run on real Glimmer.
 
 To try it, set these in `.env` (a key from build.nvidia.com):
 

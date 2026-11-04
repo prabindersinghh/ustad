@@ -193,16 +193,21 @@ def api_second_opinion(sid: str) -> dict[str, Any]:
 
 
 @app.post("/api/sessions/{sid}/second-opinion")
-def api_second_opinion_start(sid: str, x_supervisor_token: str | None = Header(default=None)) -> dict[str, Any]:
-    """Re-check a finished job's photos on Muse Glimmer, in the background.
+def api_second_opinion_start(sid: str, scope: str = "all",
+                             x_supervisor_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """Re-check a finished job's photos on Muse Glimmer, in the background:
+    every judged step, or with `scope=doubtful` only the doubtful ones.
     Needs the token because it sends the job's photos to a third party."""
     _require_supervisor(x_supervisor_token)
+    if scope not in ("all", "doubtful"):
+        raise HTTPException(400, "scope must be all or doubtful")
     if not config.open_backend_ready():
         raise HTTPException(409, "No open-weights model is configured.")
     if not _second_opinion_gate.allow():
         raise HTTPException(429, "Too many requests. Try again in a few minutes.")
     try:
-        return {"started": True, "steps": second_opinion.start(sid), "model": config.OPEN_MODEL}
+        return {"started": True, "scope": scope, "model": config.OPEN_MODEL,
+                "steps": second_opinion.start(sid, doubtful_only=scope == "doubtful")}
     except KeyError:
         raise HTTPException(404, "No such session") from None
     except (ValueError, RuntimeError) as exc:

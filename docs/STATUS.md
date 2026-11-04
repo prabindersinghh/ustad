@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-04 IST · **Tests:** 205 passing
+**Last updated:** 2026-11-04 IST · **Tests:** 216 passing
 **Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $10.61 of the $50 working cap (`/api/usage`, 20:41)
 
 ## In one paragraph
@@ -67,6 +67,8 @@ approval makes a new version.
   on-premise tier is labelled "planned" on the landing page.
 - **Whether a partner API qualifies for the open-weight prize.** Official rules
   not found online; the user should check.
+- **The edge-case review on real Glimmer.** Built and tested with mocked models,
+  page checked on a synthetic job. Not yet run against the model.
 - **A fine-tuned Glimmer does not exist.** What runs on NVIDIA today is base
   Glimmer. Built and run: the episode set (`scripts/make_episodes.py`). Not run:
   SFT, GRPO, any eval. No accuracy, loss or reward has been measured. Nothing may

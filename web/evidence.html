@@ -196,20 +196,24 @@ async function second(sid, steps) {
   box.innerHTML = `<h2>Second opinion on open weights</h2>
     <p>The photos above, judged again by <b>${model}</b>, Meta's open-weight model, through NVIDIA's API. It can take a minute per step. It never changes the job's record.</p>
     ${summary}${d.running ? '<p>Checking now. This page updates by itself.</p>' : ''}${rows ? `<ul>${rows}</ul>` : ''}
-    ${d.available && !d.running ? `<button id="second-go">${d.rows.length ? 'Ask again' : 'Get a second opinion'}</button>` : ''}`;
+    ${d.available && !d.running ? `<button id="second-go">${d.rows.length ? 'Ask again' : 'Get a second opinion'}</button>
+      ${d.doubtful ? `<button id="second-doubt">Check ${d.doubtful} doubtful step${d.doubtful === 1 ? '' : 's'} only</button>` : ''}
+      <p>Doubtful means a failed or unclear check, more than one attempt, or confidence under ${d.doubt_confidence} (a starting value, not a tuned one).${d.doubtful_no_photo ? ` ${d.doubtful_no_photo} doubtful step${d.doubtful_no_photo === 1 ? ' has' : 's have'} no saved photo, so can't be checked again.` : ''}</p>` : ''}`;
   const go = document.getElementById('second-go');
-  if (go) go.onclick = () => askSecond(sid, steps, go);
+  if (go) go.onclick = () => askSecond(sid, steps, go, 'all');
+  const doubt = document.getElementById('second-doubt');
+  if (doubt) doubt.onclick = () => askSecond(sid, steps, doubt, 'doubtful');
   if (d.running) setTimeout(() => second(sid, steps), 5000);
 }
 
-async function askSecond(sid, steps, btn) {
+async function askSecond(sid, steps, btn, scope) {
   if (!confirm("This sends this job's photos to NVIDIA's API. Don't use it on jobs showing faces or confidential footage. Continue?")) return;
   let token = null;
   try { token = localStorage.getItem('ustad-sup'); } catch (_) {}
   if (!token) token = (prompt('Supervisor token:') || '').trim();
   if (!token) return;
   btn.disabled = true;
-  const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/second-opinion`, { method: 'POST', headers: { 'X-Supervisor-Token': token } });
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/second-opinion?scope=${scope}`, { method: 'POST', headers: { 'X-Supervisor-Token': token } });
   if (r.ok) { try { localStorage.setItem('ustad-sup', token); } catch (_) {} return second(sid, steps); }
   if (r.status === 401) { try { localStorage.removeItem('ustad-sup'); } catch (_) {} }
   const e = await r.json().catch(() => ({}));

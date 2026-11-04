@@ -7,6 +7,10 @@ free API (Muse Spark: 4.6 s), so it can't guide live and must never slow a job.
 
 It reports only what Glimmer said. A failed call is recorded as an error, never
 answered by another model, because the record names the model that judged.
+
+A supervisor can also send only the doubtful steps (the edge-case review): one
+photo per doubtful step instead of one per judged step, so a slow model's time
+goes where a second look is worth most.
 """
 from __future__ import annotations
 
@@ -19,6 +23,9 @@ from . import config, db, guide, sam_parse
 
 log = logging.getLogger("ustad.second_opinion")
 
+# A verdict below this confidence counts as doubtful. A starting value, not a tuned one.
+DOUBT_CONFIDENCE = 0.8
+_JUDGED = ("pass", "fail", "retry")     # skipped and operator-confirmed steps had no model verdict
 _BOX_FIELDS = ("frame", "ordinal", "x1", "y1", "x2", "y2", "img_w", "img_h", "confidence")
 _state_lock = threading.Lock()
 _running: str | None = None            # one at a time: the free API is rate-limited
@@ -35,13 +42,28 @@ def steps_as_ran(session: dict[str, Any], proc: dict[str, Any]) -> list[dict[str
     return proc.get("steps", [])
 
 
-def _to_check(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def doubtful_steps(events: list[dict[str, Any]]) -> set[int]:
+    """Steps worth a second look: a fail or retry at any point, more than one
+    attempt, or a verdict the model itself wasn't sure of."""
+    out: set[int] = set()
+    for e in events:
+        if e.get("verdict") not in _JUDGED:
+            continue
+        conf = e.get("confidence")
+        if (e["verdict"] != "pass" or (e.get("attempt") or 1) > 1
+                or (isinstance(conf, (int, float)) and conf < DOUBT_CONFIDENCE)):
+            out.add(e["step_index"])
+    return out
+
+
+def _to_check(events: list[dict[str, Any]], *, doubtful_only: bool = False) -> list[dict[str, Any]]:
     """The last judged photo of each step: what the job's record rests on."""
     latest: dict[int, dict[str, Any]] = {}
     for e in events:
         if e.get("evidence_path") and e.get("verdict") in ("pass", "fail"):
             latest[e["step_index"]] = e
-    return [latest[i] for i in sorted(latest)]
+    keep = doubtful_steps(events) if doubtful_only else set(latest)
+    return [latest[i] for i in sorted(latest) if i in keep]
 
 
 def _detections(event: dict[str, Any]) -> list[sam_parse.Detection]:
@@ -80,8 +102,8 @@ def check_one(step: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def run(session_id: str) -> None:
-    """Check every judged step of a job, saving each answer as it arrives."""
+def run(session_id: str, *, doubtful_only: bool = False) -> None:
+    """Check a job's judged steps, or only the doubtful ones, saving each answer as it arrives."""
     global _running
     try:
         record = db.session_log(session_id)
@@ -89,7 +111,7 @@ def run(session_id: str) -> None:
         if not proc:
             return
         steps = steps_as_ran(record["session"], proc)
-        for event in _to_check(record["events"]):
+        for event in _to_check(record["events"], doubtful_only=doubtful_only):
             if event["step_index"] < len(steps):
                 row = check_one(steps[event["step_index"]], event)
                 db.save_second_opinion(session_id, row)
@@ -100,26 +122,34 @@ def run(session_id: str) -> None:
             _running = None
 
 
-def start(session_id: str) -> int:
+def start(session_id: str, *, doubtful_only: bool = False) -> int:
     """Start in the background. Returns how many photos will be checked."""
     global _running, _thread
     record = db.session_log(session_id)
     if not record["session"]:
         raise KeyError(session_id)
-    count = len(_to_check(record["events"]))
+    count = len(_to_check(record["events"], doubtful_only=doubtful_only))
     if not count:
-        raise ValueError("This job has no judged photos to check.")
+        raise ValueError("This job has no doubtful steps with a photo to check." if doubtful_only
+                         else "This job has no judged photos to check.")
     with _state_lock:
         if _running:
             raise RuntimeError("Another second opinion is running. Try again in a few minutes.")
         _running = session_id
-    _thread = threading.Thread(target=run, args=(session_id,), daemon=True, name="second-opinion")
+    _thread = threading.Thread(target=run, args=(session_id,), kwargs={"doubtful_only": doubtful_only},
+                               daemon=True, name="second-opinion")
     _thread.start()
     return count
 
 
 def status(session_id: str) -> dict[str, Any]:
+    events = db.session_log(session_id)["events"]
+    checkable = {e["step_index"] for e in _to_check(events, doubtful_only=True)}
     return {
+        "doubtful": len(checkable),
+        # A step that only ever got "can't tell" saved no photo, so it can't be re-checked.
+        "doubtful_no_photo": len(doubtful_steps(events) - checkable),
+        "doubt_confidence": DOUBT_CONFIDENCE,
         "available": config.open_backend_ready(),
         "running": _running == session_id,
         "model": config.OPEN_MODEL if config.open_backend_ready() else None,

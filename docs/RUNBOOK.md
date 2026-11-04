@@ -143,7 +143,13 @@ Open a job's evidence pack (`/evidence?s=<session>`) and press **Get a second
 opinion**. It needs the supervisor token. Photos go to NVIDIA's API: don't use it
 on footage showing faces or anything confidential. Settings: `OPEN_BASE_URL`,
 `OPEN_API_KEY`, `OPEN_MODEL`, with `REASONING_BACKEND` left on hosted. Live
-guiding on Glimmer (`REASONING_BACKEND=open`) would mean about a minute per check.
+guiding on Glimmer (`REASONING_BACKEND=open`) would mean about a minute per check,
+so leave it on hosted.
+
+**Check N doubtful steps only** sits next to it, with the same token and warning.
+It sends one photo per doubtful step: a fail or retry, more than one attempt, or
+confidence under 0.8 (`second_opinion.DOUBT_CONFIDENCE`, a starting value, not
+tuned). The button is hidden when no doubtful step has a saved photo.
 
 ## Fine-tune episodes (factory clip)
 
