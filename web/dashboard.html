@@ -305,7 +305,13 @@ async function applyImprove(id, prid, dismiss){
 /* Run a procedure as often as needed: on this device, or on a phone by
  * scanning the code / opening the copied link (the app opens it one tap
  * from starting). */
-function runURL(id){ return `${location.origin}/?run=${encodeURIComponent(id)}`; }
+let runLang = 'en';
+function runURL(id){ return `${location.origin}/?run=${encodeURIComponent(id)}${runLang === 'hi' ? '&lang=hi' : ''}`; }
+function setRunLang(id, lang){
+  runLang = lang;
+  const box = document.querySelector('.runbox');
+  if (box) box.outerHTML = runBox(id);
+}
 function runBox(id){
   let qr = '';
   try {
@@ -315,7 +321,8 @@ function runBox(id){
     <div><h3>Run this procedure</h3>
       <p>Start a guided job with it, as often as you like. On a phone: scan the code, or open the link.</p>
       <div class="actions"><a class="btn" href="${esc(runURL(id))}">Run this procedure</a>
-        <button class="btn ghost" onclick="copyRun('${id}', this)">Copy link</button></div></div>
+        <button class="btn ghost" onclick="copyRun('${id}', this)">Copy link</button>
+        <button class="btn ghost" onclick="setRunLang('${id}', '${runLang === 'hi' ? 'en' : 'hi'}')">${runLang === 'hi' ? 'Hindi link on. Use English' : 'Use Hindi (हिन्दी)'}</button></div></div>
     ${qr ? `<div class="qr" title="Scan with the phone camera">${qr}</div>` : ''}
   </div>`;
 }

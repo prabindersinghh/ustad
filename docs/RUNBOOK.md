@@ -125,7 +125,8 @@ Script errors from phones appear as `client error: <message> | <user agent>`.
 
 ## Deadline checklist
 
-- [ ] Repo **public** (GitHub, Settings, Danger zone) before Nov 5, 7:30 AM IST
-- [ ] Stable demo URL
+- [ ] Remove test procedures from the list
+- [ ] Repo **public** (GitHub, Settings, Danger zone) before Nov 5, 6:30 AM IST
+- [ ] Stable demo URL that doesn't need this laptop on
 - [ ] 3 minute video
 - [ ] Submission form

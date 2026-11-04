@@ -98,8 +98,11 @@ Rules:
     a new step there: begin a new step at that point.
   * If the expert mentions a torque, pressure, count or setting, put the exact
     value in the instruction.
-  * Write instruction, success_criteria and hazard in the same language as the
-    narration.
+  * Write title, instruction, success_criteria, hazard and expert_said in the
+    same language as the narration (Hindi stays in Devanagari).
+  * target_phrase and every watch_for phrase are ALWAYS plain English noun
+    phrases, whatever language the expert speaks: a segmentation model that
+    only reads English searches for them.
 """
 
 # Phrases SAM couldn't find are repaired with ONE small call that proposes

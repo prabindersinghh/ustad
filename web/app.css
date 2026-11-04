@@ -466,3 +466,8 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
   .foot-cta { align-items: end; }
 }
 @media (min-width: 1240px) { #health-text { display: inline; } }
+
+/* the worker's language, on the procedure list */
+.lang-toggle { display: inline-flex; margin-left: auto; padding: 3px; border-radius: 999px; background: rgba(26,86,224,.08); }
+.lang-toggle button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.lang-toggle button.on { background: var(--blue); color: #fff; }

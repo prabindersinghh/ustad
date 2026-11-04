@@ -34,13 +34,13 @@ demo and for a factory.
 | 3 | **Self-improving procedures (agent loop)** | Spark proposes edits from run evidence, SAM checks phrases, supervisor approves, versions. | Best Agentic | | **Done** (11-03). Later: proposals that split or add steps (needs step-id remapping) |
 | 4 | **Evidence pack per job** | Printable page per job. | Compliance value | | **Done** (11-03). Later: signed or hashed record |
 | 4b | **Offline resilience** (user request) | Capture keeps recording through a drop and syncs; guide resumes exactly. | Real factory Wi-Fi | | **Done** (11-03). Later: persist takes to disk |
-| 5 | **Hindi voice** | Spark writes and speaks steps in Hindi (`hi-IN` TTS on iPhone); intents in Hindi. | Real Indian shop floors | 2 to 3 h | Optional (user: English first, Hindi if possible) |
+| 5 | **Hindi voice** | Spark writes and speaks steps in Hindi (`hi-IN` TTS on iPhone); intents in Hindi. | Real Indian shop floors | | **Done** (11-04), guide side. Not yet on a real phone voice or factory noise |
 | 6 | **Smooth AR box between SAM results** | Track the box on the phone between 1 fps results (optical flow or interpolation). | The live view feels instant | 2 h | Optional |
-| 7 | **Muse Glimmer on Modal** | Verification on open weights, on infrastructure the plant controls. | Open Weights prize; data stays on site | 1 to 2 h | Blocked: user's Modal login |
-| 8 | **Stable public URL** | Named Cloudflare tunnel or ngrok static domain. | Demo link that never changes | 30 min | Blocked: user's choice |
+| 7 | **Muse Glimmer on Modal** | Verification on open weights, on infrastructure the plant controls. | Open Weights prize; data stays on site | 1 to 2 h | Blocked: Modal needs a payment method for any GPU (login done 11-04) |
+| 8 | **Stable public URL** | Named Cloudflare tunnel or ngrok static domain. | Demo link that never changes | 30 min | User wants a working link for judges: host to be agreed |
 | 9 | **Factory trial, then `evaluate.py`** | Real accuracy numbers to replace "in progress" on the landing page. | Proof; Impact | Half a day on site | User |
 | 10 | **3 minute demo video** | Capture once, guide hands-free, catch a mistake, ask a question, evidence pack. | Demo; Most Viral | 3 h | After 1 to 4 |
-| 11 | **Make the repo public** | Required for judging. | Submission | 1 min | **Before Nov 5, 7:30 AM IST** |
+| 11 | **Make the repo public** | Required for judging. | Submission | 1 min | **Before Nov 5, 6:30 AM IST** |
 
 ## Research notes (2026-11-03)
 

@@ -38,6 +38,104 @@ document.addEventListener('click', (e) => {
   else if (dest === 'library') Library.open();
 });
 
+/* ------------------------------------------------------------- language */
+
+/* The worker's language. Only words change: the server still checks every step
+ * the same way. Kept per device, and a dashboard link can set it (&lang=hi). */
+const HI = {
+  'Starting…': 'शुरू हो रहा है…',
+  'Preparing Hindi for this job…': 'इस काम के लिए हिन्दी तैयार हो रही है…',
+  'Connecting': 'जुड़ रहा है',
+  'Reconnecting': 'फिर से जुड़ रहा है',
+  'Offline': 'ऑफ़लाइन',
+  'Watching': 'देख रहा है',
+  'Live': 'लाइव',
+  'Thinking': 'सोच रहा है',
+  'Checking': 'जाँच रहा है',
+  'Looks done': 'हो गया लगता है',
+  'Done. Check it': 'हो गया, जाँचें',
+  'Looking…': 'देख रहा है…',
+  'Show me': 'दिखाओ',
+  'Ask Ustad': 'उस्ताद से पूछें',
+  'Ask': 'पूछें',
+  'Repeat': 'फिर से',
+  'Skip': 'छोड़ें',
+  'Or type a question': 'या सवाल लिखें',
+  'No connection. Keep working. Your place is saved and I will check your work when the connection is back.':
+    'कनेक्शन नहीं है। काम जारी रखें। आपकी जगह सेव है, कनेक्शन आने पर मैं आपका काम जाँच लूँगा।',
+  'Connection lost. Keep working, your place is saved.': 'कनेक्शन चला गया। काम जारी रखें, आपकी जगह सेव है।',
+  'Reconnected. Resuming step {n}.': 'फिर से जुड़ गया। स्टेप {n} से जारी है।',
+  'Back online': 'वापस ऑनलाइन',
+  "Can't see the {label} in your view": '{label} आपके व्यू में नहीं दिख रहा',
+  'step {n} / {of}': 'स्टेप {n} / {of}',
+  'Confirmed by voice': 'आवाज़ से पुष्टि हुई',
+  'Verified automatically': 'अपने आप जाँच हो गई',
+  'Verified': 'सही है',
+  'Caught': 'गलती पकड़ी',
+  'Need a better view': 'और साफ़ दिखाएँ',
+  'Read: {reading}': 'पढ़ें: {reading}',
+  'Timer {t}': 'टाइमर {t}',
+  'Time is up. Say done.': 'समय पूरा हुआ। बोलें: हो गया।',
+  'Time is up.': 'समय पूरा हुआ।',
+  'Not visible to the camera. Say done once you have checked it.': 'यह कैमरे में नहीं दिखता। जाँच लें, फिर बोलें: हो गया।',
+  'Unsafe. Stop.': 'सुरक्षित नहीं है। रुकिए।',
+  'Offline. I will check this when the connection is back.': 'ऑफ़लाइन। कनेक्शन आने पर मैं इसे जाँच लूँगा।',
+  'No picture from the camera. Check the lens is clear.': 'कैमरे से तस्वीर नहीं आ रही। देख लें कि लेंस साफ़ है।',
+  'Listening. Ask anything about this step.': 'सुन रहा हूँ। इस स्टेप के बारे में कुछ भी पूछें।',
+  'That is twice now. Here is a tip.': 'यह दूसरी बार है। एक सुझाव सुनिए।',
+  'Thinking…': 'सोच रहा हूँ…',
+  'Get a supervisor.': 'सुपरवाइज़र को बुलाएँ।',
+  'Checking your work…': 'आपका काम जाँच रहा हूँ…',
+  "Expert's view · step {n}": 'एक्सपर्ट का व्यू · स्टेप {n}',
+  'Tap the screen once to turn on voice commands.': 'आवाज़ से चलाने के लिए स्क्रीन पर एक बार टैप करें।',
+  'Voice commands on': 'आवाज़ कमांड चालू',
+  'This phone has no Hindi voice. Read the screen, or add one in Settings.': 'इस फ़ोन में हिन्दी आवाज़ नहीं है। स्क्रीन पर पढ़ें, या सेटिंग्स में जोड़ें।',
+};
+
+function tr(text, vars) {
+  let out = (Lang.code === 'hi' && HI[text]) || text;
+  if (vars) for (const k of Object.keys(vars)) out = out.split(`{${k}}`).join(vars[k]);
+  return out;
+}
+
+const Lang = {
+  code: 'en',
+  init() {
+    const asked = new URLSearchParams(location.search).get('lang');
+    let saved = null;
+    try { saved = localStorage.getItem('ustad.lang'); } catch (_) {}
+    if (asked === 'hi' || asked === 'en') this.set(asked);
+    else this.set(saved === 'hi' ? 'hi' : 'en');
+    document.addEventListener('click', (e) => {
+      const b = e.target.closest('.lang-toggle button');
+      if (b) this.set(b.dataset.lang);
+    });
+  },
+  set(code) {
+    this.code = code === 'hi' ? 'hi' : 'en';
+    try { localStorage.setItem('ustad.lang', this.code); } catch (_) {}
+    document.querySelectorAll('.lang-toggle button').forEach((b) => {
+      const on = b.dataset.lang === this.code;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    this.paint();
+  },
+  /* The guide screen's fixed labels. */
+  paint() {
+    const label = { 'guide-show': 'Show me', 'guide-ask': 'Ask Ustad', 'guide-repeat': 'Repeat', 'guide-skip': 'Skip', 'guide-done': 'Done. Check it' };
+    for (const [id, text] of Object.entries(label)) { const el = $(id); if (el) el.textContent = tr(text); }
+    const send = document.querySelector('#ask-form button');
+    if (send) send.textContent = tr('Ask');
+    const input = $('ask-input');
+    if (input) input.placeholder = tr('Or type a question');
+    const hints = $('guide-hints');
+    if (hints) hints.innerHTML = this.code === 'hi'
+      ? 'बोलें <b>हो गया</b> <b>कहाँ है</b> <b>फिर से</b> या कुछ भी पूछें'
+      : 'Say <b>done</b> <b>where is it</b> <b>repeat</b> or just ask';
+  },
+};
+
 /* -------------------------------------------------------------- voice out */
 
 const Voice = {
@@ -57,10 +155,21 @@ const Voice = {
     // Queue rather than cancel: "Good, cap's tight." then the next step's
     // instruction should both be heard, in order.
     const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.08;                          // a little brisk: instructions are short
+    if (Lang.code === 'hi') {
+      u.lang = 'hi-IN';
+      const v = this.hindiVoice();
+      if (v) u.voice = v;
+      u.rate = 1;                           // Hindi voices are already quick
+    } else {
+      u.rate = 1.08;                        // a little brisk: instructions are short
+    }
     u.onend = u.onerror = () => { this.quietUntil = Date.now() + 450; };
     this.quietUntil = Date.now() + 60000;   // until onend says otherwise
     window.speechSynthesis.speak(u);
+  },
+  hindiVoice() {
+    if (!window.speechSynthesis) return null;
+    return window.speechSynthesis.getVoices().find((v) => /^hi([-_]|$)/i.test(v.lang)) || null;
   },
   /* True while Ustad is talking, so the mic doesn't transcribe its own voice. */
   busy() {
@@ -634,7 +743,7 @@ const Capture = {
   /* The socket is open and the server has a fresh take: start recording. */
   async begin() {
     this.connecting = false;
-    this.ws.send(JSON.stringify({ type: 'start' }));
+    this.ws.send(JSON.stringify({ type: 'start', lang: Lang.code }));
     this.recording = true;
     this.startedAt = Date.now();
     clearInterval(this.clock);
@@ -939,9 +1048,19 @@ const Guide = {
     this.closing = false;
     this.retries = 0;
     this.step = 0;
-    $('guide-instruction').textContent = 'Starting…';
+    Lang.paint();
+    $('guide-instruction').textContent = tr('Starting…');
     $('guide-step-title').textContent = '';
     this.setLive('connecting', 'Connecting');
+    if (Lang.code === 'hi') {
+      // The voice list can load late on iPhone: look after a moment, and say so
+      // rather than stay silent, so the worker knows to read the screen.
+      setTimeout(() => {
+        if (Voice.hindiVoice()) return;
+        Diag.note('tts', 'no Hindi voice on this device');
+        this.toast(tr('This phone has no Hindi voice. Read the screen, or add one in Settings.'));
+      }, 1800);
+    }
     const wrap = $('guide-video').closest('.camera-wrap');
     try {
       await MediaSource_.start($('guide-video'), { audio: true });
@@ -980,8 +1099,8 @@ const Guide = {
       this.lastHeard = Date.now();
       Liveness.watch(ws, () => this.lastHeard);
       this.setBanner('');
-      if (this.sessionId) this.send({ type: 'resume', session_id: this.sessionId });
-      else this.send({ type: 'start', procedure_id: this.procedureId });
+      if (this.sessionId) this.send({ type: 'resume', session_id: this.sessionId, lang: Lang.code });
+      else this.send({ type: 'start', procedure_id: this.procedureId, lang: Lang.code });
       // A new socket is a new server session with no view yet: the change
       // detector must send a full frame first, not a "still" heartbeat, and
       // a check before that frame lands carries its own.
@@ -1001,12 +1120,12 @@ const Guide = {
         Diag.note('mic', err.message);
         if (err.message !== 'mic restarted') {
           $('guide-hints').classList.remove('on');
-          this.toast('Tap the screen once to turn on voice commands.');
+          this.toast(tr('Tap the screen once to turn on voice commands.'));
           // iOS lets audio start inside a tap: try again on the next one.
           const retry = async () => {
             Mic.prime();
             if (!this.ws || this.ws.readyState !== 1) return;
-            try { await Mic.start(MediaSource_.stream, this.micSend); $('guide-hints').classList.add('on'); this.toast('Voice commands on'); }
+            try { await Mic.start(MediaSource_.stream, this.micSend); $('guide-hints').classList.add('on'); this.toast(tr('Voice commands on')); }
             catch (e) { Diag.note('mic retry', e.message); }
           };
           document.addEventListener('touchend', retry, { once: true });
@@ -1084,10 +1203,10 @@ const Guide = {
     this.retries += 1;
     if (!this.offline) {
       this.offline = true;
-      $('guide-instruction').textContent = 'No connection. Keep working. Your place is saved and I will check your work when the connection is back.';
-      Voice.say('Connection lost. Keep working, your place is saved.');
+      $('guide-instruction').textContent = tr('No connection. Keep working. Your place is saved and I will check your work when the connection is back.');
+      Voice.say(tr('Connection lost. Keep working, your place is saved.'));
     }
-    this.setBanner('Offline', true);
+    this.setBanner(tr('Offline'), true);
     this.setLive('connecting', 'Reconnecting');
     LiveBox.tracks = {};                 // stale boxes would point at the wrong place
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
@@ -1105,7 +1224,7 @@ const Guide = {
   setLive(state, label) {
     const el = $('guide-live');
     el.className = 'live-chip ' + state;
-    el.querySelector('b').textContent = label;
+    el.querySelector('b').textContent = tr(label);
   },
 
   send(obj) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); },
@@ -1113,7 +1232,7 @@ const Guide = {
   resetDone() {
     this.busy = false;
     $('guide-done').disabled = false;
-    $('guide-done').textContent = 'Done. Check it';
+    $('guide-done').textContent = tr('Done. Check it');
   },
 
   handle(msg) {
@@ -1121,12 +1240,16 @@ const Guide = {
       case 'session':
         this.sessionId = msg.session_id;
         if (msg.resumed_at) {
-          $('guide-instruction').textContent = `Reconnected. Resuming step ${msg.resumed_at}.`;
-          this.toast('Back online');
+          $('guide-instruction').textContent = tr('Reconnected. Resuming step {n}.', { n: msg.resumed_at });
+          this.toast(tr('Back online'));
         }
         this.offline = false;
         this.setLive('watching', msg.auto ? 'Watching' : 'Live');
         if (this.pendingCheck) { this.pendingCheck = false; setTimeout(() => this.check(), 600); }
+        break;
+
+      case 'preparing':
+        $('guide-instruction').textContent = tr('Preparing Hindi for this job…');
         break;
 
       case 'thinking':
@@ -1141,7 +1264,7 @@ const Guide = {
 
       case 'point':
         LiveBox.point(msg.label, msg.detections || []);
-        if (!(msg.detections || []).length) this.toast(`Can't see the ${msg.label} in your view`);
+        if (!(msg.detections || []).length) this.toast(tr("Can't see the {label} in your view", { label: msg.label }));
         break;
 
       case 'reference':
@@ -1156,7 +1279,7 @@ const Guide = {
           break;
         }
         if (msg.step) {
-          $('guide-progress').textContent = `step ${msg.step} / ${msg.of}`;
+          $('guide-progress').textContent = tr('step {n} / {of}', { n: msg.step, of: msg.of });
           if (msg.step !== this.step && msg.target !== undefined) LiveBox.reset(msg.target);
           this.step = msg.step;
         }
@@ -1178,7 +1301,7 @@ const Guide = {
       case 'checking':
         this.busy = true;
         $('guide-done').disabled = true;
-        $('guide-done').textContent = 'Looking…';
+        $('guide-done').textContent = tr('Looking…');
         this.setLive('checking', 'Checking');
         Voice.stop();
         break;
@@ -1199,7 +1322,7 @@ const Guide = {
 
       case 'proximity':
         LiveBox.danger(msg.hazard);
-        this.hazard(`Hand near the ${msg.hazard}. Keep clear.`);
+        this.hazard(msg.text || `Hand near the ${msg.hazard}. Keep clear.`);
         break;
 
       case 'pulse':
@@ -1217,9 +1340,9 @@ const Guide = {
         if (msg.verdict === 'wait') break;          // timed step: the spoken countdown says it
         flash(msg.verdict === 'confirmed' ? 'pass' : msg.verdict);
         LiveBox.flash(msg.verdict === 'confirmed' ? 'pass' : msg.verdict);
-        if (msg.verdict === 'confirmed') this.toast('Confirmed by voice');
-        else if (msg.source === 'auto' && msg.advance) this.toast('Verified automatically');
-        else if (msg.latency_ms) this.toast(`${msg.verdict === 'pass' ? 'Verified' : msg.verdict === 'fail' ? 'Caught' : 'Need a better view'} · ${(msg.latency_ms / 1000).toFixed(1)} s`);
+        if (msg.verdict === 'confirmed') this.toast(tr('Confirmed by voice'));
+        else if (msg.source === 'auto' && msg.advance) this.toast(tr('Verified automatically'));
+        else if (msg.latency_ms) this.toast(`${tr(msg.verdict === 'pass' ? 'Verified' : msg.verdict === 'fail' ? 'Caught' : 'Need a better view')} · ${(msg.latency_ms / 1000).toFixed(1)} s`);
         break;
 
       case 'complete':
@@ -1241,21 +1364,21 @@ const Guide = {
     clearInterval(this.specTimer);
     el.className = 'step-spec ' + (kind || 'visual');
     if (kind === 'reading' && reading) {
-      el.textContent = `Read: ${reading}`;
+      el.textContent = tr('Read: {reading}', { reading });
       el.hidden = false;
     } else if (kind === 'timed' && duration) {
       const end = Date.now() + duration * 1000;
       const draw = () => {
         const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-        el.textContent = left > 0 ? `Timer ${mmss(left)}` : 'Time is up. Say done.';
+        el.textContent = left > 0 ? tr('Timer {t}', { t: mmss(left) }) : tr('Time is up. Say done.');
         el.classList.toggle('up', left === 0);
-        if (left === 0) { clearInterval(this.specTimer); Voice.say('Time is up.'); }
+        if (left === 0) { clearInterval(this.specTimer); Voice.say(tr('Time is up.')); }
       };
       draw();
       this.specTimer = setInterval(draw, 500);
       el.hidden = false;
     } else if (kind === 'confirm') {
-      el.textContent = 'Not visible to the camera. Say done once you have checked it.';
+      el.textContent = tr('Not visible to the camera. Say done once you have checked it.');
       el.hidden = false;
     } else {
       el.hidden = true;
@@ -1281,7 +1404,7 @@ const Guide = {
 
   hazard(text) {
     const el = $('guide-hazard');
-    el.textContent = text || 'Unsafe. Stop.';
+    el.textContent = text || tr('Unsafe. Stop.');
     el.classList.add('on');
     clearTimeout(this.hazTimer);
     this.hazTimer = setTimeout(() => el.classList.remove('on'), 6000);
@@ -1292,7 +1415,7 @@ const Guide = {
     if (!this.ws || this.ws.readyState !== 1) {
       // Offline: remember the tap and check as soon as the job reconnects.
       this.pendingCheck = true;
-      this.toast('Offline. I will check this when the connection is back.');
+      this.toast(tr('Offline. I will check this when the connection is back.'));
       return;
     }
     // The server judges its own live view (already grounded, so it's fast).
@@ -1301,7 +1424,7 @@ const Guide = {
     if (!this.haveView) {
       const data = MediaSource_.grab($('guide-video'));
       if (!data) {
-        if (MediaSource_.dark) this.toast('No picture from the camera. Check the lens is clear.');
+        if (MediaSource_.dark) this.toast(tr('No picture from the camera. Check the lens is clear.'));
         return;
       }
       msg.data = data;
@@ -1348,7 +1471,7 @@ const Ask = {
     const p = $('ask-panel');
     p.hidden = false;
     p.className = 'ask-panel listening';
-    $('ask-q').textContent = 'Listening. Ask anything about this step.';
+    $('ask-q').textContent = tr('Listening. Ask anything about this step.');
     $('ask-a').textContent = '';
     this.autoHide(14000);
   },
@@ -1356,8 +1479,8 @@ const Ask = {
     const p = $('ask-panel');
     p.hidden = false;
     p.className = 'ask-panel thinking';
-    $('ask-q').textContent = coach ? 'That is twice now. Here is a tip.' : `“${question}”`;
-    $('ask-a').textContent = 'Thinking…';
+    $('ask-q').textContent = coach ? tr('That is twice now. Here is a tip.') : `“${question}”`;
+    $('ask-a').textContent = tr('Thinking…');
     this.autoHide(20000);
   },
   answered({ say, tool, reason, failed }) {
@@ -1365,8 +1488,8 @@ const Ask = {
     if (failed) { this.close(); return; }
     p.hidden = false;
     p.className = 'ask-panel ' + (tool === 'escalate' ? 'escalate' : 'answered');
-    $('ask-a').textContent = tool === 'escalate' ? `Get a supervisor. ${reason || ''}`.trim() : (say || '');
-    if (tool === 'check_now') $('ask-a').textContent = 'Checking your work…';
+    $('ask-a').textContent = tool === 'escalate' ? `${tr('Get a supervisor.')} ${reason || ''}`.trim() : (say || '');
+    if (tool === 'check_now') $('ask-a').textContent = tr('Checking your work…');
     this.autoHide(tool === 'escalate' ? 15000 : 9000);
   },
   autoHide(ms) {
@@ -1408,7 +1531,7 @@ const RefCard = {
     } else {
       b.hidden = true;
     }
-    $('ref-title').textContent = `Expert's view · step ${step}`;
+    $('ref-title').textContent = tr("Expert's view · step {n}", { n: step });
     $('ref-said').textContent = said ? `“${said.length > 160 ? said.slice(0, 157) + '…' : said}”` : '';
     card.hidden = false;
     card.classList.remove('big');
@@ -1715,6 +1838,8 @@ function clearCameraError(wrapEl) {
 
 /* A dashboard "Run" link: /?run=<procedure id> opens the procedure list
  * with that one ready, one tap from starting. */
+Lang.init();
+
 (function runLink() {
   const pid = new URLSearchParams(location.search).get('run');
   if (pid) Library.open(pid, 'Ready to run. Tap to start');

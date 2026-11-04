@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import config, db, meta_client, sam_parse
+from . import config, db, i18n, meta_client, sam_parse
 
 log = logging.getLogger("ustad.guide")
 
@@ -171,13 +171,16 @@ def _quote(text: str) -> str:
     return clean[:120]
 
 
-def reading_spec(step: dict[str, Any]) -> str | None:
-    """'discharge pressure between 6 and 8 bar' for a step that needs a reading."""
+def reading_spec(step: dict[str, Any], *, lang: str = "en", what: str | None = None) -> str | None:
+    """'discharge pressure between 6 and 8 bar' for a step that needs a reading.
+    The numbers come straight from the procedure in every language."""
     r = step.get("reading")
     if not isinstance(r, dict) or (r.get("min") is None and r.get("max") is None):
         return None
-    what, unit = r.get("what") or "value", r.get("unit") or ""
+    what, unit = what or r.get("what") or "value", r.get("unit") or ""
     lo, hi = r.get("min"), r.get("max")
+    if lang == "hi":
+        return i18n.reading_spec_hi(what, lo, hi, unit)
     if lo is not None and hi is not None:
         return f"{what} between {lo:g} and {hi:g} {unit}".strip()
     if lo is not None:
@@ -299,6 +302,8 @@ def judge_step(
     upcoming: list[dict[str, Any]] | None = None,
     effort: str | None = None,
     context: str = "",
+    lang: str = "en",
+    spoken_spec: str | None = None,
 ) -> dict[str, Any]:
     """Perception + decision for one step, with NO persistence.
 
@@ -358,11 +363,15 @@ def judge_step(
     ]
 
     backend = meta_client.active_backend()
+    system = SYSTEM + i18n.say_rule(
+        lang, "say, what_is_wrong, how_to_fix and what_to_show",
+        "Keep reason and reading in English: they go in the supervisor's record. On verify_step, say is "
+        "just \"ठीक है\": a pass is not read out, so don't spend time writing one.")
     resp = meta_client.reason(
-        SYSTEM, prompt, tools=TOOLS,
+        system, prompt, tools=TOOLS,
         effort=effort or config.JUDGE_EFFORT,
         max_output_tokens=config.JUDGE_MAX_OUTPUT_TOKENS,
-        cache_key="ustad-judge",
+        cache_key="ustad-judge" if lang == "en" else f"ustad-judge-{lang}",
     )
     backend = getattr(resp, "backend", backend)  # may have fallen back
     calls = meta_client.tool_calls(resp)
@@ -373,7 +382,7 @@ def judge_step(
         fallback = (getattr(resp, "output_text", "") or "").strip()
         action = {
             "tool": "request_better_view",
-            "say": "I could not see that clearly. Hold the view steady on the part.",
+            "say": i18n.t(lang, "better_view"),
             "detail": {"what_to_show": fallback[:200] or "the target part"},
         }
     else:
@@ -391,14 +400,16 @@ def judge_step(
         lo, hi = step["reading"].get("min"), step["reading"].get("max")
         if value is not None and ((lo is not None and value < lo) or (hi is not None and value > hi)):
             unit = step["reading"].get("unit", "")
+            said = i18n.t(lang, "reading_bad", value=f"{value:g}", unit=unit, spec=spoken_spec or spec)
             action = {
                 "tool": "flag_error",
-                "say": f"Reading is {value:g} {unit}. It must be {spec}.",
+                "say": said,
                 "detail": {
                     "severity": "major", "reading": action["detail"].get("reading"),
-                    "what_is_wrong": f"{step['reading'].get('what', 'Reading')} is {value:g} {unit}, outside {spec}",
-                    "how_to_fix": "Adjust until the reading is in range, then say done.",
-                    "say": f"Reading is {value:g} {unit}. It must be {spec}.",
+                    "what_is_wrong": (said if lang != "en" else
+                                      f"{step['reading'].get('what', 'Reading')} is {value:g} {unit}, outside {spec}"),
+                    "how_to_fix": i18n.t(lang, "reading_fix"),
+                    "say": said,
                 },
             }
 
@@ -614,6 +625,7 @@ def answer_question(
     grounding: str = "",
     what_went_wrong: list[str] | None = None,
     coach: bool = False,
+    lang: str = "en",
 ) -> dict[str, Any]:
     """One Ask Ustad turn: the question, the step, the expert's words and the
     live view in; exactly one tool call out, as
@@ -658,13 +670,18 @@ def answer_question(
         content.append(meta_client.as_image_part(frame))
 
     tools = [t for t in ASK_TOOLS if not (coach and t["name"] == "check_now")]
-    resp = meta_client.reason(ASK_SYSTEM, content, tools=tools, effort=config.ASK_EFFORT,
-                              max_output_tokens=config.JUDGE_MAX_OUTPUT_TOKENS, cache_key="ustad-ask")
+    system = ASK_SYSTEM + i18n.say_rule(
+        lang, "say",
+        "Always write point_at and reason in English: point_at goes to a segmentation model that only "
+        "reads English, and reason goes in the supervisor's record.")
+    resp = meta_client.reason(system, content, tools=tools, effort=config.ASK_EFFORT,
+                              max_output_tokens=config.JUDGE_MAX_OUTPUT_TOKENS,
+                              cache_key="ustad-ask" if lang == "en" else f"ustad-ask-{lang}")
     calls = meta_client.tool_calls(resp)
     latency_ms = int((time.perf_counter() - started) * 1000)
     if not calls:
         prose = (getattr(resp, "output_text", "") or "").strip()
-        return {"tool": "answer", "say": prose[:240] or "Sorry, I didn't catch that. Ask me again.",
+        return {"tool": "answer", "say": prose[:240] or i18n.t(lang, "ask_unheard"),
                 "point_at": None, "show_reference": False, "reason": None, "latency_ms": latency_ms}
     call = calls[0]
     args = call["args"] if isinstance(call["args"], dict) else {}

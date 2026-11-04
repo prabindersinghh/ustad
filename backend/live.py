@@ -36,12 +36,14 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from . import config, db, guide, meta_client, procedures, sam_parse
+from . import config, db, guide, i18n, meta_client, procedures, sam_parse, translate
 from .realtime import VoiceRelay, intent_of, is_howto, is_question
 
 log = logging.getLogger("ustad.live")
 
 GUIDE_KEYWORDS = ["done", "repeat", "skip", "next", "what's wrong", "where"]
+GUIDE_KEYWORDS_HI = ["हो गया", "फिर से", "दोबारा", "कहाँ है", "दिखाओ", "छोड़ो", "क्यों"]
+STEP_MARKS = ("next step", "अगला स्टेप", "अगला चरण", "agla step")
 
 
 def inferable(step: dict[str, Any]) -> bool:
@@ -165,8 +167,34 @@ class GuideSession:
         self.ask_gate = _RateGate(8, 60.0)      # each answer is a model call
         self.fails: dict[int, list[str]] = {}   # step index -> what went wrong, for coaching
         self.coached: set[int] = set()
+        # The worker's language: the words change, the checks don't.
+        self.lang = "en"
+        self.loc: dict[str, Any] = {}           # this procedure's translated words
 
     # ---- helpers ---------------------------------------------------------
+    def _t(self, key: str, **kw: Any) -> str:
+        return i18n.t(self.lang, key, **kw)
+
+    def _f(self, step: dict[str, Any], field: str) -> Any:
+        """A field of a step in the worker's language, else as captured."""
+        row = (self.loc.get("steps") or {}).get(str(step.get("index", self.idx))) or {}
+        return row.get(field) or step.get(field)
+
+    def _name(self, phrase: str) -> str:
+        """What to call a part out loud. SAM still searches for `phrase`."""
+        return (self.loc.get("names") or {}).get(phrase) or phrase
+
+    def _spec(self, step: dict[str, Any]) -> str | None:
+        if self.lang == "en":
+            return guide.reading_spec(step)
+        return guide.reading_spec(step, lang=self.lang, what=self._f(step, "reading_what"))
+
+    def _lang_kw(self, step: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Extra arguments for a model call. Nothing at all in English."""
+        if self.lang == "en":
+            return {}
+        return {"lang": self.lang, **({"spoken_spec": self._spec(step)} if step is not None else {})}
+
     @property
     def step(self) -> dict[str, Any]:
         assert self.proc is not None
@@ -183,21 +211,21 @@ class GuideSession:
         self.auto_streak = 0
         self.last_flag = None
         step = self.step
-        prefix = f"Warning. {step['hazard']} " if step.get("hazard") else ""
-        spec = guide.reading_spec(step)
+        prefix = self._t("warning", hazard=self._f(step, "hazard")) if step.get("hazard") else ""
+        spec = self._spec(step)
         kind = step.get("check") or "visual"
         duration = int(step.get("duration_s") or 0)
         suffix = ""
         if spec:
-            suffix = f" It should read {spec}."
+            suffix = self._t("should_read", spec=spec)
         if kind == "timed" and duration:
-            suffix += f" Timer: {duration} seconds."
+            suffix += self._t("timer", n=duration)
         if kind == "confirm":
-            suffix += " Say done when you've checked it."
+            suffix += self._t("say_done_checked")
         await self.speak(
-            prefix + step["instruction"] + suffix,
+            prefix + self._f(step, "instruction") + suffix,
             step=self.idx + 1, of=len(self.proc["steps"]),
-            title=step.get("title", ""), target=step.get("target_phrase", ""),
+            title=self._f(step, "title") or "", target=step.get("target_phrase", ""),
             kind=kind, reading=spec, duration=duration if kind == "timed" else 0,
             ref=bool(step.get("ref_image")),
         )
@@ -209,7 +237,7 @@ class GuideSession:
             return None
         return {"type": "reference", "step": step.get("index", self.idx) + 1,
                 "image": "/" + str(rel).lstrip("/"), "box": step.get("ref_box"),
-                "target": step.get("target_phrase", ""), "said": step.get("expert_said") or ""}
+                "target": step.get("target_phrase", ""), "said": self._f(step, "expert_said") or ""}
 
     def _upcoming(self) -> list[dict[str, Any]]:
         assert self.proc is not None
@@ -223,6 +251,16 @@ class GuideSession:
 
     async def _begin(self, proc: dict[str, Any], session_id: str, idx: int, resumed: bool,
                      attempt: int = 1) -> None:
+        if self.lang != "en":
+            # Translated once per procedure version, then instant. Done before
+            # the job starts, so no step is ever spoken half in one language.
+            await self.out.send({"type": "preparing", "lang": self.lang})
+            try:
+                self.loc = await asyncio.to_thread(translate.for_session, proc, self.lang)
+            except Exception as exc:  # noqa: BLE001 - a job in English beats no job
+                log.warning("translation failed: %s", exc)
+                self.loc = {}
+                await self.out.send({"type": "notice", "text": self._t("no_translation")})
         self.proc, self.session_id, self.idx, self.attempt = proc, session_id, idx, attempt
         msg: dict[str, Any] = {
             "type": "session", "session_id": session_id, "title": proc["title"],
@@ -245,6 +283,7 @@ class GuideSession:
                 await self.out.send({"type": "error", "message": "Unknown procedure"})
                 return True
             sid = db.start_session(proc["id"], msg.get("worker"), "guide", version=proc.get("version"))
+            self.lang = i18n.norm(msg.get("lang"))
             await self._begin(proc, sid, 0, resumed=False)
 
         elif kind == "resume":
@@ -252,6 +291,7 @@ class GuideSession:
             # just past the last step that was finished (passed, inferred,
             # confirmed or skipped), with the attempt count and skips intact,
             # so a dropped connection costs the worker nothing.
+            self.lang = i18n.norm(msg.get("lang"))
             sid = msg.get("session_id")
             record = db.session_log(sid) if sid else {"session": None, "events": []}
             if not record["session"]:
@@ -307,7 +347,7 @@ class GuideSession:
             if now - self.dark_said > 12:
                 self.dark_said = now
                 await self.out.send({"type": "notice",
-                                     "text": "I can't see anything. Check the camera lens is clear."})
+                                     "text": self._t("dark")})
 
         elif kind == "diag":
             if self.diag_gate.allow():
@@ -344,7 +384,10 @@ class GuideSession:
         if not config.VOICE or self.proc is None:
             return
         if self.voice is None:
-            self.voice = VoiceRelay(self._on_voice, keywords=GUIDE_KEYWORDS)
+            hindi = self.lang == "hi"
+            self.voice = VoiceRelay(self._on_voice,
+                                    keywords=GUIDE_KEYWORDS + (GUIDE_KEYWORDS_HI if hindi else []),
+                                    language_bias=["Hindi", "English"] if hindi else None)
             self.voice.start()
         self.voice.feed(pcm)
 
@@ -394,7 +437,7 @@ class GuideSession:
                 await self.speak(f"{self.last_flag.get('what_is_wrong', '')}. {self.last_flag.get('how_to_fix', '')}".strip(". "),
                                  step=self.idx + 1, of=len(self.proc["steps"]))
             else:
-                await self.speak("Nothing is wrong so far. Say done when the step is finished.")
+                await self.speak(self._t("nothing_wrong"))
         elif intent == "where":
             await self.point()
 
@@ -414,7 +457,8 @@ class GuideSession:
         if self.proc is None:
             return
         step = self.step
-        target = step.get("target_phrase") or "the part"
+        phrase = step.get("target_phrase")
+        target = self._name(phrase) if phrase else self._t("the_part")
         ref = self._reference_msg(step)
         if ref:
             await self.out.send(ref)
@@ -423,7 +467,7 @@ class GuideSession:
             best = max(g.detections, key=lambda d: (d.confidence or 0, d.area_fraction))
             where = best.describe().split(",")[0]
             await self.out.send({"type": "pulse"})
-            await self.speak(f"The {target} is at the {where} of your view. It's highlighted.", aside=True)
+            await self.speak(self._t("at_where", target=target, where=i18n.where(self.lang, where)), aside=True)
         elif ref and isinstance(ref.get("box"), dict):
             box = ref["box"]
             try:
@@ -431,13 +475,12 @@ class GuideSession:
                     "frame", "ordinal", "x1", "y1", "x2", "y2", "img_w", "img_h")}).describe().split(",")[0]
             except (KeyError, TypeError):
                 where = ""
-            hint = f", at the {where} of the expert's view" if where else ""
-            await self.speak(f"I can't see the {target} in your view yet. Here it is in the expert's video{hint}. "
-                             "Point the camera there.", aside=True)
+            hint = self._t("ref_hint", where=i18n.where(self.lang, where)) if where else ""
+            await self.speak(self._t("unseen_ref_where", target=target, hint=hint), aside=True)
         elif ref:
-            await self.speak(f"I can't see the {target} yet. This is how the expert's view looked. Point the camera there.", aside=True)
+            await self.speak(self._t("unseen_ref", target=target), aside=True)
         else:
-            await self.speak(f"I can't see the {target} yet. Point the camera at the work.", aside=True)
+            await self.speak(self._t("unseen", target=target), aside=True)
 
     # ---- Ask Ustad -----------------------------------------------------------
     async def ask(self, question: str, *, source: str, coach: bool = False) -> None:
@@ -452,7 +495,7 @@ class GuideSession:
         if self.asking and not self.asking.done():
             return                                   # one answer at a time
         if not self.ask_gate.allow():
-            await self.speak("Give me a moment, then ask again.")
+            await self.speak(self._t("ask_wait"))
             return
         # Its own task: the voice reader that heard the question keeps
         # transcribing while Spark thinks.
@@ -464,12 +507,12 @@ class GuideSession:
         up in the live view. A model answer took ~4 s; this takes none."""
         assert self.proc is not None and self.session_id is not None
         step, idx = self.step, self.idx
-        say = step.get("instruction", "")
+        say = self._f(step, "instruction") or ""
         if step.get("expert_said"):
-            say += f" The expert says: {step['expert_said']}"
+            say += self._t("expert_says", said=self._f(step, "expert_said"))
         tips = [t for t in step.get("tips") or [] if isinstance(t, str)]
         if tips:
-            say += f" Tip: {tips[-1]}"
+            say += self._t("tip", tip=self._f(step, "tip") or tips[-1])
         await self.out.send({"type": "answer", "say": say, "tool": "answer", "instant": True})
         await self.speak(say, step=idx + 1, of=len(self.proc["steps"]), aside=True)
         ref = self._reference_msg(step)
@@ -497,11 +540,11 @@ class GuideSession:
         try:
             ans = await asyncio.to_thread(
                 guide.answer_question, self.proc, idx, question, frame,
-                grounding=grounding, what_went_wrong=self.fails.get(idx), coach=coach)
+                grounding=grounding, what_went_wrong=self.fails.get(idx), coach=coach, **self._lang_kw())
         except Exception as exc:  # noqa: BLE001
             log.warning("ask failed: %s", exc)
             await self.out.send({"type": "answer", "say": "", "failed": True})
-            await self.speak("Sorry, I couldn't work that out. Ask me again.")
+            await self.speak(self._t("ask_failed"))
             return
         if self.finished:
             return
@@ -519,7 +562,7 @@ class GuideSession:
                               reason=f"Q: {clean_for_log(q, 200)} | {ans['reason'] or 'needs a supervisor'}")
             await self.out.send({"type": "answer", "say": ans["say"], "tool": "escalate",
                                  "reason": ans["reason"] or ""})
-            await self.speak(ans["say"] or "Stop here and get your supervisor.", step=idx + 1, of=n, aside=True)
+            await self.speak(ans["say"] or self._t("get_supervisor"), step=idx + 1, of=n, aside=True)
             return
 
         db.log_step_event(self.session_id, idx, "asked",
@@ -663,8 +706,9 @@ class GuideSession:
                 if now - getattr(self, "_proximity_at", 0.0) > 6:
                     self._proximity_at = now
                     log.warning("hand near %r on step %d", o["label"], self.idx + 1)
-                    await self.out.send({"type": "proximity", "hazard": o["label"]})
-                    await self.speak(f"Hand near the {o['label']}. Keep clear.",
+                    warning = self._t("hand_near", label=self._name(o["label"]))
+                    await self.out.send({"type": "proximity", "hazard": o["label"], "text": warning})
+                    await self.speak(warning,
                                      step=self.idx + 1, of=len(self.proc["steps"]))
                 break
 
@@ -676,7 +720,7 @@ class GuideSession:
             action = await asyncio.to_thread(
                 guide.judge_step, step, g.frame, attempt=attempt, detections=g.detections, context=g.context,
                 worker_said="(nothing; this is a background look while they work)",
-                upcoming=self._upcoming(), effort=config.WATCH_EFFORT,
+                upcoming=self._upcoming(), effort=config.WATCH_EFFORT, **self._lang_kw(step),
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("background judge failed: %s", exc)
@@ -718,7 +762,7 @@ class GuideSession:
         if action["tool"] == "flag_error" and detail.get("severity") == "danger" and self.hazard_spoken_gen != self.gen:
             self.hazard_spoken_gen = self.gen
             await self.out.send({"type": "hazard", "message": detail.get("what_is_wrong", "")})
-            await self.speak(action.get("say") or "Stop. That is unsafe.", step=self.idx + 1,
+            await self.speak(action.get("say") or self._t("unsafe"), step=self.idx + 1,
                              of=len(self.proc["steps"]))
         else:
             await self.out.send({"type": "auto", "state": "watching"})
@@ -741,7 +785,7 @@ class GuideSession:
                 # A timed step is done when its time is up, not before.
                 left = self._timer_left()
                 if left > 2:
-                    await self.speak(f"{int(left)} seconds left on the timer.", step=self.idx + 1,
+                    await self.speak(self._t("seconds_left", n=int(left)), step=self.idx + 1,
                                      of=len(self.proc["steps"]))
                     await self.out.send({"type": "verdict", "verdict": "wait", "say": "", "advance": False,
                                          "detail": {}, "step": self.idx + 1, "source": source})
@@ -750,7 +794,7 @@ class GuideSession:
                 # Some checks can't be seen (listen for the click, smell for
                 # solvent). The operator's word is the record, and it says so.
                 if kind == "confirm":
-                    action = {"tool": "confirm", "say": "Got it.", "verdict": "confirmed",
+                    action = {"tool": "confirm", "say": self._t("got_it"), "verdict": "confirmed",
                               "detail": {"reason": f"Operator confirmed by voice: \"{said}\" (not visually checkable)"},
                               "latency_ms": int((time.monotonic() - t0) * 1000), "grounding": "Grounding: not applicable.",
                               "detections": [], "backend": "none"}
@@ -767,11 +811,11 @@ class GuideSession:
                     elif self.latest:
                         frame = self.latest[0]
                 if frame is None:
-                    await self.out.send({"type": "error", "message": "No camera view yet. Point the camera at the work."})
+                    await self.out.send({"type": "error", "message": self._t("no_view")})
                     return
                 action = await asyncio.to_thread(
                     guide.judge_step, step, frame, worker_said=said, attempt=self.attempt, detections=dets, context=ctx,
-                    upcoming=self._upcoming(),
+                    upcoming=self._upcoming(), **self._lang_kw(step),
                 )
                 if gen0 != self.gen:
                     return                  # the step moved on (auto-advance) meanwhile
@@ -797,7 +841,7 @@ class GuideSession:
         # model's sentence ("Good, the lid is open and the keyboard is
         # visible") cost ~3 s of listening per step. Corrections keep the
         # model's words: there the worker needs them.
-        say = "Done." if action["advance"] else (action.get("say") or "")
+        say = self._t("done") if action["advance"] else (action.get("say") or "")
         if say:
             await self.speak(say, step=self.idx + 1, of=n)
 
@@ -827,8 +871,9 @@ class GuideSession:
                     credited.append(j)
                 if credited:
                     first, last = credited[0] + 1, credited[-1] + 1
-                    span = f"Step {first} is" if first == last else f"Steps {first} to {last} are"
-                    await self.speak(f"{span} already done.", step=self.idx + 1, of=n)
+                    said = (self._t("step_already", a=first) if first == last
+                            else self._t("steps_already", a=first, b=last))
+                    await self.speak(said, step=self.idx + 1, of=n)
                     log.info("jumped from step %d past %d on visible end state (model claimed %d)",
                              self.idx + 1, last, through)
                 next_idx = self.idx + 1 + len(credited)
@@ -853,7 +898,7 @@ class GuideSession:
         once and credit each skipped step whose end state is visibly there."""
         assert self.proc is not None and self.session_id is not None
         self.finished = True
-        outcome, summary = "completed", "Procedure complete. Well done."
+        outcome, summary = "completed", self._t("complete")
         frame = frame or (self.latest[0] if self.latest else None)
         auditable = [i for i in self.skipped if inferable(self.proc["steps"][i])]
         if self.skipped and frame and auditable:
@@ -873,15 +918,15 @@ class GuideSession:
             missing = [i + 1 for i in self.skipped if i + 1 not in covered]
             if missing:
                 outcome = "completed_with_skips"
-                summary = (f"Done, but step{'s' if len(missing) > 1 else ''} "
-                           f"{', '.join(map(str, missing))} couldn't be confirmed from the end result.")
+                summary = self._t("missing", s="s" if len(missing) > 1 else "",
+                                  steps=", ".join(map(str, missing)))
             else:
-                summary = "Done. The skipped steps check out in the finished result."
+                summary = self._t("skips_ok")
             log.info("final audit: skipped %s, covered %s", [i + 1 for i in self.skipped], covered)
         elif self.skipped:
             outcome = "completed_with_skips"
-            summary = (f"Done, but step{'s' if len(self.skipped) > 1 else ''} "
-                       f"{', '.join(str(i + 1) for i in self.skipped)} were skipped and can't be confirmed.")
+            summary = self._t("skipped", s="s" if len(self.skipped) > 1 else "",
+                              steps=", ".join(str(i + 1) for i in self.skipped))
 
         # Nothing left behind: a spanner left inside a guard is a classic,
         # costly incident. Look for this job's tools (or any hand tool) in the
@@ -891,8 +936,9 @@ class GuideSession:
             if left:
                 db.log_step_event(self.session_id, len(self.proc["steps"]) - 1, "notice",
                                   reason=f"[left behind] {left} still in the work area at the end of the job")
-                await self.out.send({"type": "hazard", "message": f"{left} still in the work area"})
-                summary = f"Before you restart: the {left} is still in the work area. " + summary
+                await self.out.send({"type": "hazard",
+                                     "message": self._t("left_behind_banner", left=self._name(left))})
+                summary = self._t("left_behind", left=self._name(left)) + summary
         db.finish_session(self.session_id, outcome)
         await self.out.send({"type": "complete", "session_id": self.session_id})
         await self.speak(summary)
@@ -1183,6 +1229,7 @@ class CaptureSession:
             self.recording = True
             self.state = "recording"
             self.hint = msg.get("hint") or None
+            self.lang = i18n.norm(msg.get("lang"))
             await self.out.send({"type": "capture", "capture_id": self.capture_id})
             await self.status("Recording. Narrate each step as you do it.")
         elif kind == "diag":
@@ -1271,7 +1318,9 @@ class CaptureSession:
         if not config.VOICE:
             return
         if self.voice is None:
-            self.voice = VoiceRelay(self._on_voice)
+            # English stays on the model's own language detection, as tested.
+            self.voice = VoiceRelay(self._on_voice,
+                                    language_bias=["Hindi", "English"] if getattr(self, "lang", "en") == "hi" else None)
             self.voice.start()
         self.voice.feed(pcm)
 
@@ -1283,9 +1332,10 @@ class CaptureSession:
             return
         # "Next step, open the valve..." marks a step boundary, then narrates.
         low = text.lower().lstrip(" ,.")
-        if low.startswith("next step"):
+        mark = next((m for m in STEP_MARKS if low.startswith(m)), None)
+        if mark:
             await self.mark_step("voice")
-            text = text.lstrip(" ,.")[len("next step"):].lstrip(" ,.:")
+            text = text.lstrip(" ,.")[len(mark):].lstrip(" ,.:।")
             if not text:
                 return
         at = self.elapsed()

@@ -35,6 +35,8 @@ lands here in the same commit.
 | `backend/guide.py` | Perception and decision. `ground`, `ground_scene`, `hand_near`, `left_behind`, `judge_step` (Spark tool call, with the expert's photo when there is one), `reference_photo`, `audit_skipped`, `parse_reading`, TOOLS and SYSTEM. **Ask Ustad:** `ASK_TOOLS`, `ASK_SYSTEM`, `answer_question`. |
 | `backend/live.py` | Session logic. `GuideSession` (watcher, background judge, checks, jump-ahead with the safety gate, skip audit, end-of-job checks, dark notice, telemetry, Ask Ustad `ask`/`_answer`, `point` (Show me), coaching, resume). `CaptureSocket` (one socket: starts or rejoins a take) and `CaptureSession` (the take: pause, marks, drafts, offline frames and `audio_gap`, build as its own task, result kept for rejoin). `_TAKES` registry with a 20 min TTL. `save_reference_photos`. Also `inferable`, `log_diag`, `clean_for_log`, `_RateGate`. |
 | `backend/improve.py` | Self-improving procedures: `propose` (run evidence to Spark, phrases SAM-checked on the expert photo) and `apply` (approved items become a new version). |
+| `backend/i18n.py` | Fixed phrases in English and Hindi, and the language rule added to model prompts. |
+| `backend/translate.py` | A procedure's spoken and on-screen words in the worker's language: one model call per version, cached in `translations`. Numbers are checked in code; a field that fails falls back to the original. |
 | `backend/db.py` | SQLite: procedures (versioned), procedure_history, proposals, sessions, step_events, usage. `step_insights` (with questions), `usage_summary`, `metrics` (checks only). |
 | `backend/main.py` | FastAPI app: REST endpoints, the two WebSockets (thin `_pump` dispatch), static files, dashboard, evidence page. |
 | `web/index.html` | Landing page plus the app screens (home, capture, library, guide, report). |
@@ -44,7 +46,7 @@ lands here in the same commit.
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
 | `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal). |
-| `tests/` | 135 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
+| `tests/` | 175 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
 
@@ -216,6 +218,7 @@ chunks.
 | Server to phone | Meaning |
 |---|---|
 | `session` | Session id, title, step count, flags; `resumed_at` after a rejoin. |
+| `preparing` | A translation is being made before the job starts (`lang`). |
 | `speak {text, step, of, title, target, kind, reading, duration, ref}` | Announce a step (also sets the on-screen instruction). With `aside: true` it is an answer or pointer: spoken only. |
 | `thinking {question, coach}` · `answer {say, tool, reason?}` | Ask Ustad in progress; its result. |
 | `point {label, detections}` | Gold marker on the part Ustad means. |
@@ -256,6 +259,7 @@ chunks.
 - `procedures(id, title, machine, language, steps_json, source_transcript, created_at, version)`
 - `procedure_history(procedure_id, version, steps_json, note, created_at)`: steps before each approved change.
 - `proposals(id, procedure_id, version, items_json, status open|applied|dismissed, created_at)`
+- `translations(procedure_id, version, lang, data_json, created_at)`: a procedure's words per language and version.
 - `sessions(id, procedure_id, worker_name, mode, started_at, finished_at, outcome, procedure_version)`
 - `step_events(id, session_id, step_index, verdict, confidence, reason, grounding, evidence_path, attempt, latency_ms, backend, detections, created_at)`
   - Verdicts: pass (`verify_step`), fail (`flag_error`), retry

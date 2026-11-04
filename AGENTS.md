@@ -27,8 +27,10 @@ developer or coding agent. Read it fully before touching code.
   docs alike. Unmeasured results are written as "in progress".
 - **No em dashes** in any user-facing page (`web/`). Use commas, colons or
   full stops.
-- **No real client data.** The factory that inspired this (a paint plant in
-  Punjab) is never named, and no footage from it is committed.
+- **Client data.** The user approved naming the trial sites on 2026-11-04: a
+  textile clothing factory, and MCPL (Modern Colours Private Limited),
+  Ludhiana. Publish only the media the user supplies for this. The market line
+  is India ("we are starting with India"), not a state or region.
 - **Safety steps are never skipped by inference.** Lockout, readings, timers
   and confirm steps must be done explicitly. See `live.inferable()` and
   DECISIONS.md D-014. Do not weaken this.
@@ -36,7 +38,8 @@ developer or coding agent. Read it fully before touching code.
   Every model call is metered (`/api/usage`). Probes that call real models
   cost money: say so and keep them small.
 - **The repo must be made public before the deadline**
-  (Nov 4 2026, 9 PM ET = Nov 5, 7:30 AM IST). It is private until then.
+  Work to **Nov 5, 6:30 AM IST** (the user's call; 9 PM ET is 7:30 AM IST, but
+  one listing says 6:30). It is private until then.
 
 ## Keeping the docs alive (required)
 

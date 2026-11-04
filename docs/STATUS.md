@@ -1,7 +1,7 @@
 # Status
 
-**Last updated:** 2026-11-03 13:40 IST · **Head:** `12d9a9f` · **Tests:** 135 passing
-**Deadline:** Nov 4 2026, 9 PM ET (Nov 5, 7:30 AM IST) · **Spend:** $2.16 of the $50 working cap
+**Last updated:** 2026-11-04 IST · **Tests:** 175 passing
+**Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $5.17 of the $50 working cap
 
 ## In one paragraph
 
@@ -30,6 +30,7 @@ approval makes a new version.
 
 | Capability | Evidence |
 |---|---|
+| Hindi guide: spoken and on-screen steps, verdicts and answers; Hindi voice commands; numbers checked in code | Real models on the user's job 2026-11-04; browser at phone size; 40 tests |
 | Guiding is fast: about 7 s per step from the finished state to the next instruction (was 11.5 to 30 s), on the user's real job; instant answer to "what do I do" | Real models 2026-11-04 01:30, same photos old vs new; tests |
 | Run any procedure again from the dashboard (link, QR, copy) or from the report | Browser 2026-11-04 |
 | Capture build is fast and survives a drop: 17.2 s for the user's real take (was 87 s); browser test delivered the procedure 15 s after a mid-build drop | Real models 2026-11-03 22:30; browser test |
@@ -56,10 +57,11 @@ approval makes a new version.
 ## Not verified yet (do not claim)
 
 - **Accuracy numbers.** No factory trial yet; `scripts/evaluate.py` is ready.
-- **The new features on the user's iPhone.** All were tested in a desktop
-  browser with a fake camera and with real models. Next iPhone run: Ask, Show
-  me, and a drop (turn Wi-Fi off mid-job).
-- **Muse Glimmer on Modal.** Needs the user's Modal login.
+- **Hindi on a real phone with a real voice.** Speech was tested on synthetic
+  Hindi audio, on-device speech in a desktop browser. Not yet: an iPhone's
+  Hindi voice, a real worker's accent, factory noise.
+- **Muse Glimmer on Modal.** Login done; Modal refuses any GPU until the user
+  adds a payment method.
 
 ## Known issues
 
@@ -74,7 +76,7 @@ approval makes a new version.
 
 ## Next up (see ROADMAP.md)
 
-1. User tests on the iPhone: Ask, Show me, Wi-Fi off mid-capture and mid-job.
-2. Re-capture the demo jobs so they carry expert photos and quotes.
-3. Stable URL · Glimmer on Modal · Hindi voice · factory trial and
-   `evaluate.py` · 3 minute video · **make the repo public**.
+1. User: factory demo and video; share the factory media for the landing page.
+2. Working link for judges: needs a host the laptop doesn't have to stay on for.
+3. Glimmer on Modal once a payment method is added.
+4. Remove test procedures just before submitting · **make the repo public**.

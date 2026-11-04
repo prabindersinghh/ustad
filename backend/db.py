@@ -72,6 +72,15 @@ CREATE TABLE IF NOT EXISTS proposals (
     status       TEXT NOT NULL DEFAULT 'open',
     created_at   REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS translations (
+    procedure_id TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    lang         TEXT NOT NULL,
+    data_json    TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    PRIMARY KEY (procedure_id, version, lang)
+);
 """
 
 # Columns added after the first schema. Applied on every init so an existing
@@ -135,6 +144,19 @@ def get_procedure(pid: str) -> dict[str, Any] | None:
     out = dict(row)
     out["steps"] = json.loads(out.pop("steps_json"))
     return out
+
+
+def get_translation(pid: str, version: int, lang: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT data_json FROM translations WHERE procedure_id = ? AND version = ? AND lang = ?",
+                           (pid, version, lang)).fetchone()
+    return json.loads(row["data_json"]) if row else None
+
+
+def save_translation(pid: str, version: int, lang: str, data: dict[str, Any]) -> None:
+    with connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO translations (procedure_id, version, lang, data_json, created_at)"
+                     " VALUES (?,?,?,?,?)", (pid, version, lang, json.dumps(data, ensure_ascii=False), time.time()))
 
 
 def update_procedure_steps(pid: str, steps: list[dict[str, Any]], note: str) -> int:

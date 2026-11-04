@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from typing import Awaitable, Callable
 
 from websockets.asyncio.client import connect
@@ -37,9 +38,11 @@ OnText = Callable[[str, bool], Awaitable[None]]   # (text, final)
 class VoiceRelay:
     """One phone microphone -> one Muse Voice realtime session (with reconnects)."""
 
-    def __init__(self, on_text: OnText, *, keywords: list[str] | None = None) -> None:
+    def __init__(self, on_text: OnText, *, keywords: list[str] | None = None,
+                 language_bias: list[str] | None = None) -> None:
         self.on_text = on_text
         self.keywords = keywords or []
+        self.language_bias = language_bias or []
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=200)
         self._task: asyncio.Task | None = None
         self._closing = False
@@ -100,6 +103,8 @@ class VoiceRelay:
             }
             if self.keywords:
                 handshake["keywords"] = self.keywords
+            if self.language_bias:                # language names, e.g. ["Hindi", "English"]
+                handshake["languageBias"] = self.language_bias
             await ws.send(json.dumps(handshake))
             ack = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
             if "sessionId" not in ack:
@@ -155,15 +160,33 @@ class VoiceRelay:
 # Spoken commands for guide mode
 # --------------------------------------------------------------------------
 
+def _nf(text: str) -> str:
+    """One spelling for the same Hindi letters: speech models and keyboards
+    write some of them (like ड़) in two different ways."""
+    return unicodedata.normalize("NFC", text).lower().replace("।", " ").replace("॥", " ")
+
+
 _INTENTS: list[tuple[str, tuple[str, ...]]] = [
     # order matters: more specific phrases first
-    ("why", ("what's wrong", "what is wrong", "why", "what did i do wrong", "explain")),
-    ("where", ("where is", "where's", "show me", "which one", "what should i touch")),
-    ("repeat", ("repeat", "say again", "say that again", "come again", "pardon", "what was that")),
-    ("skip", ("skip", "skip step", "skip this")),
+    ("why", ("what's wrong", "what is wrong", "why", "what did i do wrong", "explain",
+             "क्यों", "क्यूँ", "क्या गलत", "क्या ग़लत", "kyun", "kyon", "kya galat")),
+    ("where", ("where is", "where's", "show me", "which one", "what should i touch",
+               "कहाँ", "कहां", "दिखाओ", "दिखाइए", "दिखा दो", "कौन सा", "kahan", "kahaan", "dikhao", "kaun sa")),
+    ("repeat", ("repeat", "say again", "say that again", "come again", "pardon", "what was that",
+                "फिर से", "दोबारा", "दुबारा", "फिर बोलो", "एक बार और", "phir se", "dobara", "dubara")),
+    ("skip", ("skip", "skip step", "skip this", "छोड़ो", "छोड़ दो", "स्किप", "chhodo", "chhod do")),
     ("done", ("done", "finished", "i'm done", "im done", "complete", "check it", "check this",
-              "all done", "ok done", "okay done", "next", "ready")),
+              "all done", "ok done", "okay done", "next", "ready",
+              "हो गया", "हो गई", "हो गयी", "हो चुका", "कर दिया", "कर लिया", "खत्म", "ख़त्म", "अगला", "डन",
+              "चेक करो", "जाँच करो", "जांच करो", "ho gaya", "ho gayi", "kar diya", "kar liya", "agla", "check karo")),
 ]
+_INTENTS = [(name, tuple(_nf(p) for p in phrases)) for name, phrases in _INTENTS]
+
+_NEGATIONS = tuple(f" {_nf(w)} " for w in ("not", "नहीं", "नही", "मत", "nahi", "nahin", "mat"))
+_QUESTION_HI = tuple(_nf(w) for w in ("क्या", "कैसे", "कहाँ", "कहां", "क्यों", "क्यूँ", "कौन", "कौनसा", "कब",
+                                      "kya", "kaise", "kahan", "kahaan", "kyun", "kyon", "kaun"))
+_HELP_HI = tuple(_nf(w) for w in ("मदद", "madad", "समझ नहीं", "samajh nahi", "नहीं हो रहा", "nahi ho raha",
+                                  "फंस गया", "फँस गया", "अटक गया", "उस्ताद", "बताओ", "batao"))
 
 
 _QUESTION_START = ("how", "what", "which", "where", "why", "when", "can", "could", "should", "do", "does",
@@ -180,13 +203,14 @@ def is_question(text: str) -> bool:
     Kept narrow on purpose: every answer is a model call and it talks over the
     worker. The Ask button bypasses this for anything said right after it.
     """
-    t = " ".join(text.lower().replace(",", " ").split())
+    t = " ".join(_nf(text).replace(",", " ").split())
     words = t.rstrip("?.!").split()
     if len(words) < 2 or len(words) > 40:
         return False
-    if "?" in text or words[0].strip("'") in _QUESTION_START:
+    if "?" in text or words[0].strip("'") in _QUESTION_START or any(w in _QUESTION_HI for w in words):
         return True
-    return any(f" {h} " in f" {t.rstrip('?.!')} " for h in _HELP)
+    bare = f" {t.rstrip('?.!')} "
+    return any(f" {h} " in bare for h in _HELP) or any(f" {h} " in bare for h in _HELP_HI)
 
 
 _HOWTO = re.compile(
@@ -195,12 +219,17 @@ _HOWTO = re.compile(
     r"|help( me)?$|^help\b|i('?m| am) stuck|i don'?t (know|get it)|i'?m lost|tell me again)")
 
 
+_HOWTO_HI = re.compile(_nf(
+    r"(क्या|कैसे) (करूँ|करूं|करू|करना|करें)|अब क्या|आगे क्या|मदद|समझ नहीं|फ[ंँ]स गया|अटक गया"
+    r"|(kya|kaise) kar|ab kya|aage kya|madad|samajh nahi"))
+
+
 def is_howto(text: str) -> bool:
     """A generic "how do I do this?" (not a specific question): answered at
     once from the step itself (the instruction, the expert's own words,
     their photo, the live highlight), with no model call."""
-    t = " ".join(text.lower().replace(",", " ").split()).rstrip("?.!")
-    return 0 < len(t.split()) <= 7 and bool(_HOWTO.search(t))
+    t = " ".join(_nf(text).replace(",", " ").split()).rstrip("?.!")
+    return 0 < len(t.split()) <= 7 and bool(_HOWTO.search(t) or _HOWTO_HI.search(t))
 
 
 def intent_of(text: str) -> str | None:
@@ -209,14 +238,17 @@ def intent_of(text: str) -> str | None:
     Only short utterances count, so narration-like chatter ("I'm not done
     with the valve yet") does not trigger a check.
     """
-    t = " " + " ".join(text.lower().replace(",", " ").replace(".", " ").replace("!", " ")
+    t = " " + " ".join(_nf(text).replace(",", " ").replace(".", " ").replace("!", " ")
                        .replace("?", " ").split()) + " "
     if len(t.split()) > 6:
         return None
-    if " not " in t or "n't done" in t:
+    if any(n in t for n in _NEGATIONS) or "n't done" in t:
         return None
     for name, phrases in _INTENTS:
         for p in phrases:
             if f" {p} " in t:
+                # "क्या हो गया?" ("what happened?") holds "हो गया" but isn't a "done".
+                if name == "done" and any(f" {q} " in t for q in _QUESTION_HI):
+                    return None
                 return name
     return None

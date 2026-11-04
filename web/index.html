@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=16" />
+<link rel="stylesheet" href="app.css?v=17" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -322,10 +322,9 @@
       <div class="wrap">
         <span class="eyebrow">Proof</span>
         <h2 class="sec-h">Measured, not promised</h2>
-        <p class="body wide">We build and run the factory software for a paint manufacturer in Punjab. Ustad
-          is being trialled on their line, with their senior technician and their own procedures, and with
-          errors planted on purpose to see what it catches. Until those numbers are in, here is what we have
-          measured ourselves.</p>
+        <p class="body wide">We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern
+          Colours Private Limited) in Ludhiana. We are starting with India, a huge market, and Ustad guides
+          workers in English and Hindi. Until the trial numbers are in, here is what we have measured ourselves.</p>
         <div class="proof-grid">
           <table class="data measured">
             <caption>Measured on our own test runs</caption>
@@ -333,13 +332,14 @@
               <tr><td>From "done" to a decision</td><td class="num">4 to 5 s</td></tr>
               <tr><td>From saying "done" to the check starting</td><td class="num">0.3 s</td></tr>
               <tr><td>Wrong step caught, fix spoken</td><td class="num">yes, live</td></tr>
-              <tr><td>Recording to a checked job card</td><td class="num">about 40 s</td></tr>
+              <tr><td>Finished step to the next instruction</td><td class="num">about 7 s</td></tr>
+              <tr><td>Short recording to a checked job card</td><td class="num">about 17 s</td></tr>
               <tr><td>Cost to record one job</td><td class="num">about $0.08</td></tr>
-              <tr><td>Cost of live guidance</td><td class="num">$0.10 to $0.19 a minute</td></tr>
+              <tr><td>Cost of guiding a 4-step job</td><td class="num">about $0.10</td></tr>
             </tbody>
           </table>
           <table class="data">
-            <caption>From the paint-plant trial</caption>
+            <caption>From the factory trials</caption>
             <tbody>
               <tr><td>Correct steps confirmed</td><td class="pending">in progress</td></tr>
               <tr><td>Planted errors caught</td><td class="pending">in progress</td></tr>
@@ -404,6 +404,10 @@
   <header class="bar">
     <button class="back dark" data-go="home">&larr;</button>
     <h2>Procedures</h2>
+    <div class="lang-toggle" role="group" aria-label="Language">
+      <button type="button" data-lang="en" lang="en">English</button>
+      <button type="button" data-lang="hi" lang="hi">हिन्दी</button>
+    </div>
   </header>
   <div id="library-list" class="list"></div>
 </section>
@@ -462,6 +466,6 @@
   <div id="report-body" class="list"></div>
 </section>
 
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

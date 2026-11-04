@@ -25,15 +25,17 @@ command -v modal >/dev/null 2>&1 || {
   exit 1
 }
 
-echo "==> Creating a dedicated endpoint for ${MODEL}"
-echo "    (dedicated scales to zero, so idle time costs nothing)"
-modal endpoint create --model "${MODEL}"
-
-echo
+# Modal needs a payment method on the workspace before it runs any GPU, and a
+# proxy token before it creates an authenticated endpoint, so the token is first.
 echo "==> Creating a proxy token"
 echo "    Modal has no separate API key: join the token id and secret with a"
 echo "    dot and use that as the OpenAI api_key."
 modal workspace proxy-tokens create
+
+echo
+echo "==> Creating a dedicated endpoint for ${MODEL}"
+echo "    (dedicated scales to zero, so idle time costs nothing)"
+modal endpoint create --name ustad-glimmer --model "${MODEL}"
 
 cat <<'NOTE'
 
