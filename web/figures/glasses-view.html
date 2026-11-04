@@ -7,61 +7,109 @@
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@500;600;700;800&display=swap" rel="stylesheet" />
 <style>
 
-html, body { margin: 0; height: 100%; background: #0a1020; overflow: hidden; }
-#fit { position: absolute; left: 0; top: 0; width: 1100px; height: 600px; transform-origin: 0 0; font-family: Figtree, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; overflow: hidden; background: #0a1020; }
-#world { position: absolute; left: 154px; top: -340px; width: 792px; height: 1241px; object-fit: fill; background: #0f1830; }
+html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+#fit { position: absolute; left: 0; top: 0; width: 1100px; height: 600px; transform-origin: 0 0; font-family: Figtree, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; overflow: hidden; background: #fff; }
+
+/* The same clip behind each lens. The nose bridge hides that they do not join. */
+#world, #world2 { position: absolute; top: -280px; width: 673px; height: 1055px; object-fit: fill; background: #0f1830; }
+#world { left: -123px; }
+#world2 { left: 405px; clip-path: inset(0 0 0 145px); }
+
+/* The right lens is the display: tinted glass, coloured by what is happening. */
+#tint { position: absolute; left: 600px; top: 90px; width: 460px; height: 450px; background: rgba(10, 16, 32, .8); transition: background .25s ease; }
+.step #tint, .check #tint, .next #tint { background: rgba(26, 86, 224, .86); }
+.ok #tint { background: rgba(14, 134, 88, .88); }
+.warn #tint { background: rgba(214, 48, 54, .92); }
+
 #frame { position: absolute; inset: 0; }
 .hud { position: absolute; opacity: 0; transition: opacity .25s ease; }
 .on .hud.show-on, .boot .only-boot, .step .only-step, .check .only-check, .ok .only-ok, .warn .only-warn, .next .only-next { opacity: 1; }
-.card { background: rgba(10, 16, 32, .84); border-radius: 14px; padding: 14px 18px; }
-#tag { left: 700px; top: 58px; font-size: 20px; font-weight: 700; color: #8fb2ff; background: rgba(10,16,32,.84); padding: 8px 14px; border-radius: 10px; opacity: 1; }
-#voice { left: 700px; top: 112px; width: 196px; font-size: 26px; font-weight: 600; }
-#voice small { display: block; font-size: 18px; font-weight: 600; color: #8fb2ff; margin-bottom: 4px; }
-.say { left: 200px; bottom: 56px; width: 300px; }
-.say small { display: block; font-size: 19px; font-weight: 700; color: #8fb2ff; margin-bottom: 4px; }
-.say b { display: block; font-size: 28px; line-height: 1.14; font-weight: 700; }
-.say.only-ok small { color: #4fd1a1; }
-.say.only-warn { background: rgba(229, 72, 77, .96); }
-.only-warn small { color: #fff; }
-.pill { left: 200px; top: 58px; font-size: 21px; font-weight: 700; padding: 8px 15px; border-radius: 10px; background: rgba(10,16,32,.84); }
-.pill i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; background: #8fb2ff; }
-.pill.good i { background: #4fd1a1; }
-.box { left: 512px; top: 382px; width: 232px; height: 150px; border: 4px solid #fff; border-radius: 12px; outline: 3px solid #1a56e0; }
+
+#tag { left: 0; top: 14px; width: 1100px; text-align: center; font-size: 26px; font-weight: 700; color: #1a56e0; opacity: 1; }
+
+.pill { left: 630px; width: 400px; top: 136px; text-align: center; font-size: 26px; font-weight: 700; }
+.pill i { display: inline-block; width: 13px; height: 13px; border-radius: 50%; margin-right: 9px; background: #fff; vertical-align: 2px; }
+
+.say { left: 648px; top: 190px; width: 364px; text-align: center; }
+.say small { display: block; font-size: 24px; font-weight: 700; color: rgba(255, 255, 255, .86); margin-bottom: 8px; }
+.say b { display: block; font-size: 42px; line-height: 1.12; font-weight: 800; }
+
+#voice { left: 700px; top: 392px; width: 260px; text-align: center; font-size: 34px; font-weight: 700; }
+#voice small { display: block; font-size: 21px; font-weight: 600; color: rgba(255, 255, 255, .86); margin-bottom: 2px; }
+
+/* Target boxes stay on the part, in the left lens. */
+.box { left: 181px; top: 334px; width: 197px; height: 128px; border: 4px solid #fff; border-radius: 12px; outline: 3px solid #1a56e0; }
 .box.good { outline-color: #12a06a; }
-.box span { position: absolute; left: -4px; top: -40px; white-space: nowrap; background: #1a56e0; font-size: 20px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
+.box span { position: absolute; left: -24px; top: -46px; white-space: nowrap; background: #1a56e0; font-size: 24px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
 .box.good span { background: #12a06a; }
-.haz { left: 500px; top: 196px; width: 210px; height: 140px; border: 4px solid #fff; outline: 3px solid #e5484d; border-radius: 12px; }
-.haz span { position: absolute; left: -4px; bottom: -40px; white-space: nowrap; background: #e5484d; font-size: 20px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
+.haz { left: 171px; top: 176px; width: 178px; height: 119px; border: 4px solid #fff; outline: 3px solid #e5484d; border-radius: 12px; }
+.haz span { position: absolute; left: -24px; bottom: -46px; white-space: nowrap; background: #e5484d; font-size: 24px; font-weight: 700; padding: 3px 10px; border-radius: 7px; }
 </style>
 </head>
 <body>
 <div id="fit" class="boot">
   <video id="world" src="../assets/factory/glasses-view.mp4" muted loop playsinline autoplay preload="auto"></video>
-  <svg id="frame" viewBox="0 0 1100 600" aria-hidden="true">
-    <path fill="#0a1020" fill-rule="evenodd" d="M0 0H1100V600H0Z M204 30 H896 Q940 30 936 78 L908 400 Q896 556 720 566 H380 Q204 556 192 400 L164 78 Q160 30 204 30Z"/>
-    <path fill="none" stroke="#16264d" stroke-width="16" d="M204 30 H896 Q940 30 936 78 L908 400 Q896 556 720 566 H380 Q204 556 192 400 L164 78 Q160 30 204 30Z"/>
-    <path fill="#16264d" d="M0 96 H172 V150 H0Z M932 56 H1100 V100 H932Z"/>
-  </svg>
-  <div id="tag" class="hud">Concept view</div>
-  <div id="voice" class="hud only-check only-ok card"><small>The worker says</small>"Done."</div>
+  <video id="world2" src="../assets/factory/glasses-view.mp4" muted loop playsinline autoplay preload="auto" aria-hidden="true"></video>
+  <div id="tint"></div>
 
   <div class="hud pill only-step only-next"><i></i>Watching</div>
   <div class="hud pill only-check"><i></i>Checking</div>
-  <div class="hud pill good only-ok"><i></i>Verified</div>
+  <div class="hud pill only-ok"><i></i>Verified</div>
 
   <div class="hud box only-step only-check"><span>blue plastic part</span></div>
   <div class="hud box good only-ok"><span>blue plastic part: seated</span></div>
   <div class="hud haz only-warn"><span>Keep clear: print head</span></div>
 
-  <div class="hud say card only-boot"><small>Ustad</small><b>Starting the job.</b></div>
-  <div class="hud say card only-step only-check"><small>Step 2 of 4</small><b>Place a blue part onto the fixture.</b></div>
-  <div class="hud say card only-ok"><small>Step 2 verified</small><b>That's right. Next step.</b></div>
-  <div class="hud say card only-warn"><small>Safety</small><b>Hand near the print head. Keep clear.</b></div>
-  <div class="hud say card only-next"><small>Step 3 of 4</small><b>Press the blue part firmly down.</b></div>
+  <div class="hud say only-boot"><small>Ustad</small><b>Starting the job.</b></div>
+  <div class="hud say only-step only-check"><small>Step 2 of 4</small><b>Place a blue part onto the fixture.</b></div>
+  <div class="hud say only-ok"><small>Step 2 verified</small><b>That's right.<br />Next step.</b></div>
+  <div class="hud say only-warn"><small>Safety</small><b>Hand near the print head.<br />Keep clear.</b></div>
+  <div class="hud say only-next"><small>Step 3 of 4</small><b>Press the blue part firmly down.</b></div>
+  <div id="voice" class="hud only-check only-ok"><small>The worker says</small>"Done."</div>
+
+  <svg id="frame" viewBox="0 0 1100 600" aria-hidden="true">
+    <defs>
+      <linearGradient id="acetate" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#2c2f38" />
+        <stop offset=".2" stop-color="#121318" />
+        <stop offset="1" stop-color="#050506" />
+      </linearGradient>
+      <radialGradient id="glass" cx=".38" cy=".34" r=".7">
+        <stop offset="0" stop-color="#5a78c8" />
+        <stop offset=".45" stop-color="#14203f" />
+        <stop offset="1" stop-color="#04060c" />
+      </radialGradient>
+      <clipPath id="lensClip">
+        <path d="M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
+        <path transform="matrix(-1 0 0 1 1100 0)" d="M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
+      </clipPath>
+      <path id="surround" fill="#fff" fill-rule="evenodd" d="M0 0H551V600H0Z M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
+      <g id="half">
+        <path fill="url(#acetate)" fill-rule="evenodd" d="M0 98C70 82 160 66 270 64C360 62 432 76 480 102C506 116 530 122 551 122V200C526 200 512 216 506 248C494 326 468 404 414 474C372 528 300 560 214 560C130 560 86 524 62 444C42 376 34 284 30 214C28 190 14 172 0 166Z M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
+        <path fill="none" stroke="#3d414d" stroke-width="2.5" d="M64 232C64 160 118 106 214 104C300 102 376 104 424 124C460 140 478 184 478 244C478 322 448 398 396 456C352 504 286 528 214 528C150 528 112 494 94 432C78 374 64 300 64 232Z" />
+      </g>
+    </defs>
+    <!-- White first, then black over both, so no white shows at the centre join. -->
+    <use href="#surround" />
+    <use href="#surround" transform="matrix(-1 0 0 1 1100 0)" />
+    <use href="#half" />
+    <use href="#half" transform="matrix(-1 0 0 1 1100 0)" />
+    <!-- A faint reflection, running the same way across both lenses. -->
+    <path fill="#fff" opacity=".045" clip-path="url(#lensClip)" d="M120 90H250L90 560H-40Z M290 90H336L176 560H130Z M690 90H820L660 560H530Z M860 90H906L746 560H700Z" />
+    <!-- Capture light on one corner, camera on the other. -->
+    <circle cx="36" cy="132" r="6.5" fill="#f4f7ff" />
+    <circle cx="36" cy="132" r="11" fill="none" stroke="#f4f7ff" stroke-opacity=".28" stroke-width="2" />
+    <circle cx="1064" cy="132" r="15" fill="#1b1d24" stroke="#555a68" stroke-width="2" />
+    <circle cx="1064" cy="132" r="9.5" fill="url(#glass)" />
+    <circle cx="1061" cy="129" r="2.2" fill="#fff" opacity=".85" />
+  </svg>
+
+  <div id="tag" class="hud">Concept view through Meta glasses</div>
 </div>
 <script>
   const fit = document.getElementById('fit');
   const world = document.getElementById('world');
+  const world2 = document.getElementById('world2');
   const PHASES = [[0, 'boot'], [1.2, 'step'], [5.5, 'check'], [7, 'ok'], [9.6, 'warn'], [13, 'next']];
   function phaseAt(t) {
     let name = PHASES[0][1];
@@ -75,20 +123,27 @@ html, body { margin: 0; height: 100%; background: #0a1020; overflow: hidden; }
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const param = new URLSearchParams(location.search).get('t');
   if (param !== null || still) {
-    world.removeAttribute('autoplay');
-    world.pause();
+    [world, world2].forEach((v) => { v.removeAttribute('autoplay'); v.pause(); });
     paint(param !== null ? +param : 8);
   } else {
-    (function tick() { paint(world.currentTime); requestAnimationFrame(tick); })();
+    (function tick() {
+      paint(world.currentTime);
+      // The second lens follows the first; it only needs to stay roughly together.
+      if (!world2.seeking && Math.abs(world2.currentTime - world.currentTime) > 0.25) world2.currentTime = world.currentTime;
+      requestAnimationFrame(tick);
+    })();
     world.play().catch(() => {});
+    world2.play().catch(() => {});
   }
   // For making the README animation, frame by frame.
-  window.seekTo = (t) => new Promise((done) => {
-    world.pause();
+  window.seekTo = (t) => {
     paint(t);
-    world.onseeked = () => { world.onseeked = null; done(); };
-    world.currentTime = t;
-  });
+    return Promise.all([world, world2].map((v) => new Promise((done) => {
+      v.pause();
+      v.onseeked = () => { v.onseeked = null; done(); };
+      v.currentTime = t;
+    })));
+  };
 </script>
 </body>
 </html>
