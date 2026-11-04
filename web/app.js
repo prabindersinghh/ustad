@@ -1962,6 +1962,18 @@ fetch('/api/health')
   links.forEach((a) => { const s = document.getElementById(a.dataset.jump); if (s) io.observe(s); });
 })();
 
+/* The "on ground work" clip loops while it is on screen. Nothing downloads until
+ * then, so it adds no weight to the first load of the landing page. */
+(function initGroundClip() {
+  const clip = document.getElementById('ground-video');
+  const root = document.getElementById('screen-home');
+  if (!clip || !root || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  new IntersectionObserver(([e]) => {
+    if (e.isIntersecting) clip.play().catch(() => {}); // e.g. iPhone Low Power Mode: the poster stays
+    else clip.pause();
+  }, { root, rootMargin: '200px 0px' }).observe(clip);
+})();
+
 /* Hero hotspots: each label is pinned to a 3D point on the glasses and shown
  * only while its part faces the viewer. Facing is the dot product of the
  * part's surface normal with the direction to the camera, recomputed on every

@@ -68,7 +68,7 @@ Meta glasses are where Ustad is going: a camera that sees what the hands do, mic
 
 ## Where we've tried it
 
-We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. We are starting with India, a huge market. The trial results are below.
+We tested Ustad in two factories: PI Cottex Pvt Ltd, a textile and clothing manufacturer, and MCPL (Modern Colours Private Limited), both in Ludhiana. We are starting with India, a huge market. The trial results are below.
 
 ---
 

@@ -470,6 +470,27 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .trial-photos img { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 10px; }
 @media (max-width: 640px) { .trial-photos { grid-template-columns: 1fr; } .trial-photos img { aspect-ratio: 4 / 3; } }
 
+/* The floor gallery: a tall looping clip beside four equal photos. The photos
+   set the row heights; the clip is taken out of flow so it fills them exactly. */
+.trial-media { grid-template-columns: minmax(0, .86fr) repeat(2, minmax(0, 1fr)); }
+.trial-media figure { position: relative; margin: 0; overflow: hidden; border-radius: 10px; background: var(--ink-2); }
+.trial-media img { aspect-ratio: 4 / 3; border-radius: 0; }
+.trial-media .tm-lead img { object-position: 62% center; }
+.tm-video { grid-row: span 2; }
+.tm-video video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; }
+.tm-label { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.25; color: #fff; background: rgba(10,16,32,.74); }
+.tm-strong { top: 10px; bottom: auto; background: var(--blue); letter-spacing: .06em; }
+@media (max-width: 640px) {
+  /* Phones: the PI Cottex photo leads, the clip sits beside two square photos,
+     and the store photo closes the group at full width. */
+  .trial-media { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trial-media img { aspect-ratio: 1 / 1; }
+  .trial-media .tm-lead, .trial-media .tm-tail { grid-column: 1 / -1; }
+  .trial-media .tm-lead { order: -1; }
+  .trial-media .tm-lead img, .trial-media .tm-tail img { aspect-ratio: 16 / 9; }
+  .tm-strong { padding: 5px 9px; font-size: 11px; letter-spacing: .02em; }
+}
+
 /* demo sign-in */
 .signin { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(10,16,32,.6); }
 .signin[hidden] { display: none; }

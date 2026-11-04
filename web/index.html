@@ -27,7 +27,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=25" />
+<link rel="stylesheet" href="app.css?v=26" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -465,15 +465,32 @@
       <div class="wrap">
         <span class="eyebrow">Proof</span>
         <h2 class="sec-h">Measured, not promised</h2>
-        <p class="body wide">We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern
-          Colours Private Limited) in Ludhiana. We are starting with India, a huge market, and Ustad guides
-          workers in English and Hindi. Here is what we measured.</p>
-        <div class="trial-photos">
-          <img src="assets/factory/mcpl-floor.jpg" alt="The MCPL production floor: a long row of teal mixing machines and steel tanks, with workers in the aisle" loading="lazy" width="1100" height="976" />
-          <img src="assets/factory/mcpl-mixers.jpg" alt="Numbered mixing machines and steel tanks at MCPL, with paint drums in front" loading="lazy" width="1100" height="1065" />
-          <img src="assets/factory/mcpl-store.jpg" alt="The MCPL store: drums, cartons and stacked sacks along a concrete aisle" loading="lazy" width="1100" height="977" />
+        <p class="body wide">We tested Ustad in two factories: PI Cottex Pvt Ltd, a textile and clothing
+          manufacturer, and MCPL (Modern Colours Private Limited), both in Ludhiana. We are starting with
+          India, a huge market, and Ustad guides workers in English and Hindi. Here is what we measured.</p>
+        <div class="trial-photos trial-media">
+          <figure class="tm-video">
+            <video id="ground-video" muted loop playsinline preload="none" poster="assets/factory/mcpl-ground.jpg" width="540" height="960" aria-label="On ground work at MCPL: walking the production floor past paint drums and lifting gear, with workers at the mixing tanks"><source src="assets/factory/mcpl-ground.mp4" type="video/mp4" /></video>
+            <figcaption><span class="tm-label tm-strong">ON GROUND WORK</span><span class="tm-label">MCPL, Ludhiana</span></figcaption>
+          </figure>
+          <figure class="tm-lead">
+            <img src="assets/factory/picottex-floor.jpg" alt="A worker in a blue uniform and hairnet stacking grey textile pieces on the PI Cottex production floor" loading="lazy" width="1200" height="672" />
+            <figcaption><span class="tm-label">PI Cottex Pvt Ltd, Ludhiana</span></figcaption>
+          </figure>
+          <figure>
+            <img src="assets/factory/mcpl-floor.jpg" alt="The MCPL production floor: a long row of teal mixing machines and steel tanks, with workers in the aisle" loading="lazy" width="1100" height="976" />
+            <figcaption><span class="tm-label">MCPL, Ludhiana</span></figcaption>
+          </figure>
+          <figure>
+            <img src="assets/factory/mcpl-mixers.jpg" alt="Numbered mixing machines and steel tanks at MCPL, with paint drums in front" loading="lazy" width="1100" height="1065" />
+            <figcaption><span class="tm-label">MCPL, Ludhiana</span></figcaption>
+          </figure>
+          <figure class="tm-tail">
+            <img src="assets/factory/mcpl-store.jpg" alt="The MCPL store: drums, cartons and stacked sacks along a concrete aisle" loading="lazy" width="1100" height="977" />
+            <figcaption><span class="tm-label">MCPL, Ludhiana</span></figcaption>
+          </figure>
         </div>
-        <p class="caption">At MCPL (Modern Colours Private Limited), Ludhiana.</p>
+        <p class="caption">At PI Cottex Pvt Ltd and MCPL (Modern Colours Private Limited), Ludhiana.</p>
         <div class="proof-grid">
           <table class="data measured">
             <caption>Speed and cost</caption>
@@ -537,7 +554,7 @@
           <article class="col">
             <h3>Has it been on a real floor?</h3>
             <b class="w-stat">2 factories</b>
-            <p>A textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. It's not tested on glasses yet: today it runs on a phone.</p>
+            <p>PI Cottex Pvt Ltd, a textile and clothing manufacturer, and MCPL (Modern Colours Private Limited), both in Ludhiana. It's not tested on glasses yet: today it runs on a phone.</p>
           </article>
         </div>
       </div>
@@ -558,7 +575,7 @@
           <details><summary>What if the camera can't see the part?</summary><p>Ustad asks for a better view instead of guessing. If its vision model can't find the part, the record shows that no box was found.</p></details>
           <details><summary>How much does it cost to run?</summary><p>About $0.09 to record a job and about $0.12 to guide a 4-step job, in model costs.</p></details>
           <details><summary>Which languages does it speak?</summary><p>English and Hindi today. Real accents and factory noise in Hindi still need more testing.</p></details>
-          <details><summary>Has it been used in a real factory?</summary><p>We tested it in two: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. In those trials, 97% of correct steps were confirmed, 95% of planted errors were caught, new operators were 88% faster than the current method, and job cards took 79% less of a senior technician's time.</p></details>
+          <details><summary>Has it been used in a real factory?</summary><p>We tested it in two: PI Cottex Pvt Ltd, a textile and clothing manufacturer, and MCPL (Modern Colours Private Limited), both in Ludhiana. In those trials, 97% of correct steps were confirmed, 95% of planted errors were caught, new operators were 88% faster than the current method, and job cards took 79% less of a senior technician's time.</p></details>
         </div>
       </div>
     </section>
@@ -707,6 +724,6 @@
     <button type="submit" class="signin-go">Sign in</button>
   </form>
 </div>
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>

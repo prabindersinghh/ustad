@@ -22,7 +22,7 @@ What a factory job really takes is often in the head of one expert. When that pe
 - **Guide.** A worker hears one step at a time, in English or Hindi. When they finish, SAM 3.1 finds the part and Muse Spark must choose one of three tools: pass the step, flag an error, or ask for a better view.
 - **Evidence.** Every check saves its photo, verdict and reason in a printable pack. Safety steps are never skipped by inference.
 
-We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. We are starting with India, a huge market. Trial results: 97% of correct steps confirmed, 95% of planted errors caught, new operators 88% faster than the current method, and job cards 79% faster for senior technicians.
+We tested Ustad in two factories: PI Cottex Pvt Ltd, a textile and clothing manufacturer, and MCPL (Modern Colours Private Limited), both in Ludhiana. We are starting with India, a huge market. Trial results: 97% of correct steps confirmed, 95% of planted errors caught, new operators 88% faster than the current method, and job cards 79% faster for senior technicians.
 
 ## Measured on our own test runs
 

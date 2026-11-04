@@ -27,8 +27,8 @@ developer or coding agent. Read it fully before touching code.
   docs alike. Unmeasured results are written as "in progress".
 - **No em dashes** in any user-facing page (`web/`). Use commas, colons or
   full stops.
-- **Client data.** The user approved naming the trial sites on 2026-11-04: a
-  textile clothing factory, and MCPL (Modern Colours Private Limited),
+- **Client data.** The user approved naming the trial sites: PI Cottex Pvt
+  Ltd (textile and clothing) and MCPL (Modern Colours Private Limited), both in
   Ludhiana. Publish only the media the user supplies for this. The market line
   is India ("we are starting with India"), not a state or region.
 - **Safety steps are never skipped by inference.** Lockout, readings, timers
