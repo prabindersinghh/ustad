@@ -119,7 +119,7 @@ def test_offline_audio_and_takes_are_bounded(cap, monkeypatch):
     # for one take, someone else is refused: never evicted for another client.
     # (Pretend the test client is the local tunnel, so the header counts.)
     monkeypatch.setattr(live, "MAX_TAKES", 1)
-    monkeypatch.setattr(live, "_client_of", lambda ws: ws.headers.get("cf-connecting-ip") or "testclient")
+    monkeypatch.setattr(live, "client_address", lambda ws: ws.headers.get("cf-connecting-ip") or "testclient")
     with client.websocket_connect("/ws/capture", headers={"cf-connecting-ip": "203.0.113.9"}) as ws:
         ws.send_json({"type": "start"})
         assert "busy" in _until(ws, "error")["message"]
@@ -136,9 +136,9 @@ def test_client_identity_trusts_the_tunnel_header_only_from_loopback():
         def __init__(self, host, header=None):
             self.client = type("C", (), {"host": host})()
             self.headers = {"cf-connecting-ip": header} if header else {}
-    assert live._client_of(WS("127.0.0.1", "198.51.100.7")) == "198.51.100.7"   # via cloudflared
-    assert live._client_of(WS("192.168.1.20", "1.2.3.4")) == "192.168.1.20"     # LAN: header ignored
-    assert live._client_of(WS("::1")) == "::1"
+    assert live.client_address(WS("127.0.0.1", "198.51.100.7")) == "198.51.100.7"   # via cloudflared
+    assert live.client_address(WS("192.168.1.20", "1.2.3.4")) == "192.168.1.20"     # LAN: header ignored
+    assert live.client_address(WS("::1")) == "::1"
 
 
 def test_near_empty_abandoned_takes_free_their_slot_quickly(cap, monkeypatch):

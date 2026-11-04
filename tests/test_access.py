@@ -17,7 +17,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DEMO_ACCESS_CODE", CODE)
     monkeypatch.setattr(config, "supervisor_token", lambda: "tok")
     monkeypatch.setattr(main, "_login_gates", {})
-    monkeypatch.setattr(main, "_login_all", live._RateGate(1000, 600.0))
     monkeypatch.setattr(main, "_socket_gates", {})
     db.init()
     access.reset_spend_cache()
@@ -68,6 +67,49 @@ def test_expired_sign_in_is_refused(client, monkeypatch):
     assert access.signed_in(token)
     monkeypatch.setattr(access.time, "time", lambda: 10 ** 11)
     assert not access.signed_in(token)
+
+
+@pytest.mark.parametrize("host", ["x/api/health?", "evil.example/#", "testserver/api/me?a="])
+def test_a_crafted_host_header_cannot_skip_the_check(client, host):
+    assert client.get("/api/sessions", headers={"host": host}).status_code == 401
+    assert client.get("/media/photo.jpg", headers={"host": host}).status_code == 401
+
+
+def test_only_wrong_guesses_count(client):
+    for _ in range(7):
+        assert client.post("/api/login", json={"code": "x"}).status_code == 401
+    for _ in range(3):
+        assert client.post("/api/login", json={"code": CODE}).status_code == 200
+    assert client.post("/api/login", json={"code": "x"}).status_code == 401
+    assert client.post("/api/login", json={"code": CODE}).status_code == 429
+
+
+def test_limit_table_never_resets_other_clients(client):
+    gates = {}
+    victim = main._gate_for(gates, "victim", 1, 3600.0)
+    assert victim.allow()
+    for i in range(3000):
+        main._gate_for(gates, f"flood{i}", 1, 3600.0)
+    assert len(gates) <= 2000
+    assert all(g is not None for g in gates.values())
+
+
+def test_spoofed_forwarding_header_is_ignored_where_no_tunnel(client, monkeypatch):
+    monkeypatch.setattr(config, "TRUST_CF_CONNECTING_IP", False)
+    conn = type("C", (), {"client": type("A", (), {"host": "127.0.0.1"})(), "headers": {"cf-connecting-ip": "1.2.3.4"}})()
+    assert live.client_address(conn) == "127.0.0.1"
+
+
+def test_unreadable_spend_stops_paid_work_on_the_public_link(client, monkeypatch):
+    def broken():
+        raise RuntimeError("db gone")
+
+    monkeypatch.setattr(db, "usage_total", broken)
+    access.reset_spend_cache()
+    assert access.spend_stop() is None                 # a brief hiccup keeps the last decision
+    monkeypatch.setattr(access, "_last_read_ok", access.time.monotonic() - 120)
+    monkeypatch.setattr(access, "_spend_state", (0.0, None))
+    assert "can't check" in access.spend_stop()
 
 
 def test_cookie_is_protected(client):

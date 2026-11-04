@@ -11,11 +11,16 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import time
 
 from . import config, db
 
+log = logging.getLogger("ustad.access")
+
 COOKIE = "ustad_demo"
+_UNREADABLE_GRACE_S = 60.0
+_last_read_ok = time.monotonic()
 TTL_S = 7 * 24 * 3600
 _SPEND_CACHE_S = 5.0
 _spend_state: tuple[float, str | None] = (0.0, None)
@@ -59,7 +64,7 @@ def signed_in(token: str | None) -> bool:
 
 def spend_stop() -> str | None:
     """Why new paid work must stop, or None. Short cache: this runs before every paid call."""
-    global _spend_state
+    global _spend_state, _last_read_ok
     now = time.monotonic()
     if _spend_state[0] and now - _spend_state[0] < _SPEND_CACHE_S:
         return _spend_state[1]
@@ -69,12 +74,19 @@ def spend_stop() -> str | None:
             reason = "The demo has reached its total spending limit."
         elif config.HOURLY_SPEND_CAP_USD and db.usage_last_hour() >= config.HOURLY_SPEND_CAP_USD:
             reason = "The demo is busy and has reached its hourly spending limit. Please try again later."
-    except Exception:  # noqa: BLE001 - a metering hiccup must not take the product down
-        reason = None
+        _last_read_ok = now
+    except Exception as exc:  # noqa: BLE001
+        # A brief hiccup keeps the last decision. If spend stays unreadable, the
+        # public link stops paid work rather than spend blind.
+        log.warning("could not read spend: %s", type(exc).__name__)
+        reason = _spend_state[1]
+        if enabled() and now - _last_read_ok > _UNREADABLE_GRACE_S:
+            reason = "The demo can't check its spending right now. Please try again later."
     _spend_state = (now, reason)
     return reason
 
 
 def reset_spend_cache() -> None:
-    global _spend_state
+    global _spend_state, _last_read_ok
     _spend_state = (0.0, None)
+    _last_read_ok = time.monotonic()

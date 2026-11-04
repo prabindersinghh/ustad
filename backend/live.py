@@ -84,12 +84,16 @@ class _RateGate:
     def __init__(self, n: int, per: float) -> None:
         self.n, self.per, self.times = n, per, []
 
-    def allow(self) -> bool:
+    def full(self) -> bool:
+        """At the limit, without counting this as an event."""
         now = time.monotonic()
         self.times = [t for t in self.times if now - t < self.per]
-        if len(self.times) >= self.n:
+        return len(self.times) >= self.n
+
+    def allow(self) -> bool:
+        if self.full():
             return False
-        self.times.append(now)
+        self.times.append(time.monotonic())
         return True
 
 
@@ -1053,14 +1057,15 @@ TAKE_TTL_EMPTY_S = 120                      # a detached take with almost nothin
 _take_gates: dict[str, _RateGate] = {}      # new takes per client: 6 per 10 min
 
 
-def _client_of(ws: WebSocket) -> str:
-    """Who opened this socket. Behind the Cloudflare tunnel every peer is
-    the local cloudflared, which sets CF-Connecting-IP to the phone's real
+def client_address(conn) -> str:
+    """Who opened this request or socket. Behind the Cloudflare tunnel every peer
+    is the local cloudflared, which sets CF-Connecting-IP to the phone's real
     address (Cloudflare overwrites any value a client sends). The header is
-    trusted only from loopback: a direct LAN client is its own address."""
-    host = ws.client.host if getattr(ws, "client", None) else "?"
-    if host in ("127.0.0.1", "::1"):
-        ip = ws.headers.get("cf-connecting-ip") if hasattr(ws, "headers") else None
+    trusted only from loopback, and only where that tunnel is the way in
+    (TRUST_CF_CONNECTING_IP): the public link gets the real address from Modal."""
+    host = conn.client.host if getattr(conn, "client", None) else "?"
+    if config.TRUST_CF_CONNECTING_IP and host in ("127.0.0.1", "::1"):
+        ip = conn.headers.get("cf-connecting-ip") if hasattr(conn, "headers") else None
         if ip:
             return ip
     return host
@@ -1105,7 +1110,7 @@ class CaptureSocket:
     def __init__(self, ws: WebSocket) -> None:
         self.out = _Socket(ws)
         self.take: CaptureSession | None = None
-        self.owner = _client_of(ws)
+        self.owner = client_address(ws)
 
     async def on_text(self, msg: dict[str, Any]) -> bool:
         kind = msg.get("type")

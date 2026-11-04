@@ -14,6 +14,7 @@ import base64
 import hmac
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -60,17 +61,20 @@ app.add_middleware(
 
 # Open to anyone: the landing page and what it needs. Everything else is signed in.
 _OPEN_API = {"/api/health", "/api/login", "/api/me", "/api/clientlog"}
-_SIGNED_IN_PAGES = {"/dashboard", "/evidence"}
+_SIGNED_IN_PAGES = {"/dashboard", "/evidence", "/dashboard.html", "/evidence.html"}
 
 
 @app.middleware("http")
 async def _access_gate(request: Request, call_next):
-    path = request.url.path
+    # The path the router will use. request.url is rebuilt from the Host header,
+    # which the client controls, so it must never decide access.
+    path = request.scope["path"]
     if access.enabled() and not access.signed_in(request.cookies.get(access.COOKIE)):
         if (path.startswith("/api/") and path not in _OPEN_API) or path.startswith("/media/"):
             return JSONResponse({"detail": "sign_in"}, status_code=401)
         if path in _SIGNED_IN_PAGES:
-            target = path + ("?" + request.url.query if request.url.query else "")
+            query = request.scope.get("query_string", b"").decode("latin-1")
+            target = path + ("?" + query if query else "")
             return RedirectResponse("/?signin=" + quote(target, safe=""), status_code=303)
     response = await call_next(request)
     if path.startswith(("/models/", "/assets/")):
@@ -82,7 +86,18 @@ async def _access_gate(request: Request, call_next):
 
 
 _login_gates: dict[str, live._RateGate] = {}
-_login_all = live._RateGate(60, 600.0)
+
+
+def _gate_for(gates: dict[str, live._RateGate], client: str, n: int, per: float) -> live._RateGate:
+    """One client's limiter. A full table drops idle entries, then the oldest:
+    never everyone's, so flooding it can't reset other clients' limits."""
+    if client not in gates and len(gates) >= 2000:
+        now = time.monotonic()
+        for key in [k for k, g in gates.items() if not any(now - t < g.per for t in g.times)]:
+            del gates[key]
+        while len(gates) >= 2000:
+            del gates[next(iter(gates))]
+    return gates.setdefault(client, live._RateGate(n, per))
 
 
 @app.get("/api/me")
@@ -95,13 +110,12 @@ def api_login(request: Request, payload: dict[str, Any]) -> JSONResponse:
     """The demo sign-in. Attempts are limited, so the code can't be guessed."""
     if not access.enabled():
         return JSONResponse({"ok": True})
-    host = request.client.host if request.client else "?"
-    if len(_login_gates) > 2000:
-        _login_gates.clear()
-    gate = _login_gates.setdefault(host, live._RateGate(8, 600.0))
-    if not gate.allow() or not _login_all.allow():
+    # Only wrong guesses count, per client: nobody can lock anyone else out.
+    gate = _gate_for(_login_gates, live.client_address(request), 8, 600.0)
+    if gate.full():
         raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
     if not access.code_ok(payload.get("code")):
+        gate.allow()
         raise HTTPException(401, "That code isn't right.")
     response = JSONResponse({"ok": True})
     response.set_cookie(access.COOKIE, access.issue(), max_age=access.TTL_S, httponly=True, samesite="lax",
@@ -336,10 +350,7 @@ def _socket_refusal(ws: WebSocket) -> str | None:
         return "The demo is full right now. Please try again in a few minutes."
     if not config.SOCKETS_PER_CLIENT_PER_HOUR:
         return None
-    host = live._client_of(ws)
-    if len(_socket_gates) > 2000:
-        _socket_gates.clear()
-    gate = _socket_gates.setdefault(host, live._RateGate(config.SOCKETS_PER_CLIENT_PER_HOUR, 3600.0))
+    gate = _gate_for(_socket_gates, live.client_address(ws), config.SOCKETS_PER_CLIENT_PER_HOUR, 3600.0)
     if not gate.allow():
         return "Too many sessions from this device. Please try again later."
     return None
