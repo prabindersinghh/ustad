@@ -67,7 +67,7 @@ approval makes a new version.
 
 ## Not verified yet (do not claim)
 
-- **Accuracy numbers.** No factory trial yet; `scripts/evaluate.py` is ready.
+- **Factory trial results** came from the user on 11-05: 97% correct steps confirmed, 95% planted errors caught, new operators 88% faster, senior technician 79% faster, 20 to 38 s to a job card, about $0.09 and $0.12. They aren't in this repository's database, so keep the raw trial records.
 - **Hindi on a real phone with a real voice.** Speech was tested on synthetic
   Hindi audio, on-device speech in a desktop browser. Not yet: an iPhone's
   Hindi voice, a real worker's accent, factory noise.

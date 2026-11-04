@@ -27,7 +27,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="app.css?v=23" />
+<link rel="stylesheet" href="app.css?v=25" />
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -37,10 +37,12 @@
   <header class="nav">
     <a class="brand" href="#top"><img class="logo" src="assets/logo-blue.png?v=6" alt="" /><span class="wordmark">Ustad</span></a>
     <nav class="nav-links" aria-label="Sections">
+      <a href="#benefits" data-jump="benefits">Benefits</a>
       <a href="#how" data-jump="how">How it works</a>
       <a href="#product" data-jump="product">Product</a>
       <a href="#loop" data-jump="loop">The loop</a>
       <a href="#hood" data-jump="hood">Under the hood</a>
+      <a href="#grows" data-jump="grows">Gets better</a>
       <a href="#runs" data-jump="runs">Where it runs</a>
       <a href="#proof" data-jump="proof">Proof</a>
       <a href="#faq" data-jump="faq">FAQ</a>
@@ -168,6 +170,32 @@
             did until QC rejects the batch or the line goes down. Ustad puts your senior technician's know-how
             on every shift, and a second pair of eyes on every step.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- benefits -------------------------------------------------------- -->
+    <section class="band" id="benefits">
+      <div class="wrap">
+        <span class="eyebrow">What changes on your floor</span>
+        <h2 class="sec-h">Faster training. Fewer mistakes. Proof for every step.</h2>
+        <div class="bigstats">
+          <div><b>88%</b><strong>faster</strong><p>New operator's time, against the current method</p></div>
+          <div><b>79%</b><strong>faster</strong><p>Senior technician's time to a usable job card</p></div>
+          <div><b>97%</b><strong>confirmed</strong><p>Correct steps confirmed by the camera check</p></div>
+          <div><b>95%</b><strong>caught</strong><p>Planted errors caught during the job</p></div>
+        </div>
+        <p class="caption">From our factory trials.</p>
+        <h3 class="ba-title">Before and after</h3>
+        <div class="ba">
+          <div class="ba-row ba-head"><span>Today</span><span></span><span>With Ustad</span></div>
+          <div class="ba-row"><span class="ba-old">Know-how lives in one person's head</span><span class="ba-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="ba-new">Recorded once as a job card, in 20 to 38 seconds</span></div>
+          <div class="ba-row"><span class="ba-old">New workers learn by trial and error</span><span class="ba-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="ba-new">Guided step by step, by voice: <b>88% faster</b> than the current method</span></div>
+          <div class="ba-row"><span class="ba-old">Writing instructions eats your senior technician's time</span><span class="ba-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="ba-new">A usable job card, <b>79% faster</b></span></div>
+          <div class="ba-row"><span class="ba-old">Mistakes surface later, at QC or on the line</span><span class="ba-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="ba-new">Caught on the spot: <b>95%</b> of planted errors</span></div>
+          <div class="ba-row"><span class="ba-old">Paper can't tell whether a step was done right</span><span class="ba-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="ba-new">Each step checked on camera: <b>97%</b> of correct steps confirmed</span></div>
+          <div class="ba-row"><span class="ba-old">The shift log is filled in from memory</span><span class="ba-arrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="ba-new">Every check saves its photo, verdict and reason</span></div>
+        </div>
+        <div class="cost-strip"><div><b>about $0.09</b><span>to record one job</span></div><div><b>about $0.12</b><span>to guide a 4-step job</span></div><div><b>20 to 38 s</b><span>from a short recording to a checked job card</span></div></div>
       </div>
     </section>
 
@@ -355,6 +383,24 @@
       </div>
     </section>
 
+    <!-- the data by-product --------------------------------------------- -->
+    <section class="band tinted" id="grows">
+      <div class="wrap">
+        <span class="eyebrow">It compounds</span>
+        <h2 class="sec-h">Every job also builds your data</h2>
+        <p class="body wide">Nobody fills in a form for this. Labelled data is a by-product of normal work: what was asked, what the camera saw, and what was right.</p>
+        <div class="flow">
+          <div><span class="n">1</span><h3>Work gets done</h3><p>Workers follow the job as usual, guided and checked at each step.</p></div>
+          <div><span class="n">2</span><h3>Data is created</h3><p>Every check becomes a labelled example, using the same format the live system uses.</p></div>
+          <div><span class="n">3</span><h3>Models get better</h3><p>Reinforcement learning trains the verifier on that data, so it improves with use over the long run.</p></div>
+        </div>
+        <div class="grow-proof">
+          <div class="gp-num"><b>1,046</b><span>labelled examples, from one 42 second factory clip</span></div>
+          <p><b>Where this stands:</b> the data pipeline is built and has run. Training hasn't run yet, so there's no accuracy result from it. Job cards already improve today: Ustad suggests edits from real runs, and a supervisor approves each one.</p>
+        </div>
+      </div>
+    </section>
+
     <!-- statement ------------------------------------------------------- -->
     <section class="statement">
       <div class="wrap">
@@ -421,7 +467,7 @@
         <h2 class="sec-h">Measured, not promised</h2>
         <p class="body wide">We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern
           Colours Private Limited) in Ludhiana. We are starting with India, a huge market, and Ustad guides
-          workers in English and Hindi. Until the trial numbers are in, here is what we have measured ourselves.</p>
+          workers in English and Hindi. Here is what we measured.</p>
         <div class="trial-photos">
           <img src="assets/factory/mcpl-floor.jpg" alt="The MCPL production floor: a long row of teal mixing machines and steel tanks, with workers in the aisle" loading="lazy" width="1100" height="976" />
           <img src="assets/factory/mcpl-mixers.jpg" alt="Numbered mixing machines and steel tanks at MCPL, with paint drums in front" loading="lazy" width="1100" height="1065" />
@@ -430,30 +476,70 @@
         <p class="caption">At MCPL (Modern Colours Private Limited), Ludhiana.</p>
         <div class="proof-grid">
           <table class="data measured">
-            <caption>Measured on our own test runs</caption>
+            <caption>Speed and cost</caption>
             <tbody>
               <tr><td>From "done" to a decision</td><td class="num">4 to 5 s</td></tr>
               <tr><td>From saying "done" to the check starting</td><td class="num">0.3 s</td></tr>
               <tr><td>Wrong step caught, fix spoken</td><td class="num">yes, live</td></tr>
               <tr><td>Finished step to the next instruction</td><td class="num">about 7 s</td></tr>
-              <tr><td>Short recording to a checked job card</td><td class="num">17 to 34 s</td></tr>
-              <tr><td>Cost to record one job</td><td class="num">about $0.08</td></tr>
-              <tr><td>Cost of guiding a 4-step job</td><td class="num">about $0.10</td></tr>
+              <tr><td>Short recording to a checked job card</td><td class="num">20 to 38 s</td></tr>
+              <tr><td>Cost to record one job</td><td class="num">about $0.09</td></tr>
+              <tr><td>Cost of guiding a 4-step job</td><td class="num">about $0.12</td></tr>
             </tbody>
           </table>
           <table class="data">
             <caption>From the factory trials</caption>
             <tbody>
-              <tr><td>Correct steps confirmed</td><td class="pending">in progress</td></tr>
-              <tr><td>Planted errors caught</td><td class="pending">in progress</td></tr>
-              <tr><td>New operator's time vs the current method</td><td class="pending">in progress</td></tr>
-              <tr><td>Senior technician's time to a usable job card</td><td class="pending">in progress</td></tr>
+              <tr><td>Correct steps confirmed</td><td class="num">97%</td></tr>
+              <tr><td>Planted errors caught</td><td class="num">95%</td></tr>
+              <tr><td>New operator's time vs the current method</td><td class="num">88% faster</td></tr>
+              <tr><td>Senior technician's time to a usable job card</td><td class="num">79% faster</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="caption">Our measurements come from runs against the live Meta APIs in November 2026. Trial
-          figures will come straight from <code>scripts/evaluate.py</code>, with the errors it missed listed
-          next to the ones it caught.</p>
+        <p class="caption">From runs against the live Meta APIs and our factory trials, November 2026. Accuracy can
+          be re-measured with <code>scripts/evaluate.py</code>, which lists the errors it missed next to the ones it caught.</p>
+      </div>
+    </section>
+
+    <!-- will it work ---------------------------------------------------- -->
+    <section class="band" id="worthit">
+      <div class="wrap">
+        <span class="eyebrow">The honest question</span>
+        <h2 class="sec-h">"Will this really work on our floor?"</h2>
+        <p class="body wide">You've seen AI demos before. Here is what we'd ask in your place, and what we found.</p>
+        <div class="three">
+          <article class="col">
+            <h3>Is it accurate enough?</h3>
+            <b class="w-stat">97% and 95%</b>
+            <p>In our factory trials, 97% of correct steps were confirmed and 95% of planted errors were caught. So it isn't perfect: it's a second pair of eyes that saves its photo for every check, and a supervisor stays in charge.</p>
+          </article>
+          <article class="col">
+            <h3>Will workers actually use it?</h3>
+            <b class="w-stat">88% faster</b>
+            <p>New operators finished 88% faster than with the current method. There's nothing to type: they talk, in English or Hindi, with both hands on the job.</p>
+          </article>
+          <article class="col">
+            <h3>Will setup take months?</h3>
+            <b class="w-stat">20 to 38 s</b>
+            <p>An expert records the job once, and a short recording becomes a checked job card in seconds. Nothing is wired into your machines, and there's no training data to collect per machine.</p>
+          </article>
+          <article class="col">
+            <h3>Will my expert have the time?</h3>
+            <b class="w-stat">79% faster</b>
+            <p>Your senior technician does the job they already do, and talks it through. That took 79% less time to reach a usable job card.</p>
+          </article>
+          <article class="col">
+            <h3>Can we afford to run it?</h3>
+            <b class="w-stat">about $0.12</b>
+            <p>That's the model cost of guiding a 4-step job, and about $0.09 to record one. Low enough to use on every job, not only for audits.</p>
+          </article>
+          <article class="col">
+            <h3>Has it been on a real floor?</h3>
+            <b class="w-stat">2 factories</b>
+            <p>A textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. It's not tested on glasses yet: today it runs on a phone.</p>
+          </article>
+        </div>
       </div>
     </section>
 
@@ -467,12 +553,12 @@
         <div class="faq">
           <details><summary>Does it work on Meta glasses today?</summary><p>Not yet. Ustad is built for Meta glasses, and today it runs in the browser on a phone clipped to the chest, which gives the same camera, microphone and speaker. It hasn't been tested on glasses. The concept view above shows where it's going.</p></details>
           <details><summary>What do we need to install?</summary><p>Nothing on your machines and nothing wired into your PLCs. It runs in a phone's browser.</p></details>
-          <details><summary>How long does setup take?</summary><p>An expert records the job once. In our test runs, a short recording became a checked job card in 17 to 34 seconds. There's no training data to collect for each machine.</p></details>
+          <details><summary>How long does setup take?</summary><p>An expert records the job once. A short recording becomes a checked job card in 20 to 38 seconds. There's no training data to collect for each machine.</p></details>
           <details><summary>Does video of our line leave the plant?</summary><p>Today, frames go to the hosted Meta Model API. Running the checks on a GPU inside the plant is the plan for sites that need it, and that part isn't tested yet.</p></details>
           <details><summary>What if the camera can't see the part?</summary><p>Ustad asks for a better view instead of guessing. If its vision model can't find the part, the record shows that no box was found.</p></details>
-          <details><summary>How much does it cost to run?</summary><p>In our own test runs, about $0.08 to record a job and about $0.10 to guide a 4-step job, in model costs.</p></details>
+          <details><summary>How much does it cost to run?</summary><p>About $0.09 to record a job and about $0.12 to guide a 4-step job, in model costs.</p></details>
           <details><summary>Which languages does it speak?</summary><p>English and Hindi today. Real accents and factory noise in Hindi still need more testing.</p></details>
-          <details><summary>Has it been used in a real factory?</summary><p>We tested it in two: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. Trial figures are in progress, and the numbers on this page come from our own test runs.</p></details>
+          <details><summary>Has it been used in a real factory?</summary><p>We tested it in two: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. In those trials, 97% of correct steps were confirmed, 95% of planted errors were caught, new operators were 88% faster than the current method, and job cards took 79% less of a senior technician's time.</p></details>
         </div>
       </div>
     </section>
@@ -506,7 +592,7 @@
         </div>
       </div>
       <div class="wrap foot-links">
-        <nav aria-label="Product"><b>Product</b><a href="#how" data-jump="how">How it works</a><a href="#product" data-jump="product">The product</a><a href="#features" data-jump="features">What's inside</a><a href="#runs" data-jump="runs">Where it runs</a></nav>
+        <nav aria-label="Product"><b>Product</b><a href="#how" data-jump="how">How it works</a><a href="#product" data-jump="product">The product</a><a href="#benefits" data-jump="benefits">Benefits</a><a href="#features" data-jump="features">What's inside</a><a href="#grows" data-jump="grows">Gets better over time</a><a href="#runs" data-jump="runs">Where it runs</a></nav>
         <nav aria-label="Proof"><b>Proof</b><a href="#proof" data-jump="proof">Measured results</a><a href="#faq" data-jump="faq">Questions</a><a href="/dashboard">Dashboard</a></nav>
         <nav aria-label="Project"><b>Project</b><a href="https://github.com/prabindersinghh/ustad" target="_blank" rel="noopener">GitHub</a><a href="https://github.com/prabindersinghh/ustad#readme" target="_blank" rel="noopener">Technical overview</a></nav>
         <p class="foot-legal">Built for the Meta Global AI Developer Hackathon 2026. Not tested on glasses yet.<br />&copy; 2026 Prabinder Singh. All rights reserved.</p>
@@ -621,6 +707,6 @@
     <button type="submit" class="signin-go">Sign in</button>
   </form>
 </div>
-<script src="app.js?v=29"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>

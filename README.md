@@ -68,7 +68,7 @@ Meta glasses are where Ustad is going: a camera that sees what the hands do, mic
 
 ## Where we've tried it
 
-We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. We are starting with India, a huge market. Trial figures are still in progress, so the numbers below come from our own test runs.
+We tested Ustad in two factories: a textile clothing factory, and MCPL (Modern Colours Private Limited) in Ludhiana. We are starting with India, a huge market. The trial results are below.
 
 ---
 
@@ -283,16 +283,23 @@ The demo's sign-in is one shared code. A plant would sign in with its own accoun
 
 ## Measured results
 
-From our own test runs against the live Meta APIs, November 2026.
+| From the factory trials | |
+|---|---|
+| Correct steps confirmed | 97% |
+| Planted errors caught | 95% |
+| New operator's time vs the current method | 88% faster |
+| Senior technician's time to a usable job card | 79% faster |
+
+Speed and cost, from runs against the live Meta APIs and the trials, November 2026.
 
 | | |
 |---|---|
 | From "done" to a decision | 4 to 5 s |
 | From saying "done" to the check starting | 0.3 s |
 | Finished step to the next instruction | about 7 s |
-| Short recording to a checked job card | 17 to 34 s |
-| Cost to record one job | about $0.08 |
-| Cost of guiding a 4-step job | about $0.10 |
+| Short recording to a checked job card | 20 to 38 s |
+| Cost to record one job | about $0.09 |
+| Cost of guiding a 4-step job | about $0.12 |
 
 | 8 test cases, 4 deliberately wrong | Right | False passes | Median per check |
 |---|---|---|---|
@@ -305,7 +312,6 @@ That's a small sample. `scripts/evaluate.py` replays labelled frames through the
 
 We'd rather say this than have you find it.
 
-- **Trial figures** from the factories are still in progress.
 - **Glasses:** not tested on any glasses. The view at the top is a concept.
 - **Reinforcement learning:** data pipeline built, nothing trained.
 - **On-site Glimmer:** only run through a hosted API so far.

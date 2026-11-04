@@ -219,6 +219,20 @@ const Voice = {
     return (window.speechSynthesis && window.speechSynthesis.speaking) || Date.now() < this.quietUntil;
   },
   stop() { window.speechSynthesis && window.speechSynthesis.cancel(); this.quietUntil = 0; },
+  /* Run `fn` once Ustad has finished the sentence. It waits at least minMs, so a
+   * status line can be read, and never past maxMs, because some phones report
+   * speech as still running long after it has ended. */
+  afterSpeech(fn, minMs = 1600, maxMs = 8000) {
+    const started = Date.now();
+    const tick = () => {
+      const s = window.speechSynthesis;
+      const talking = !!s && (s.speaking || s.pending);
+      const waited = Date.now() - started;
+      if (waited >= maxMs || (waited >= minMs && !talking)) fn();
+      else setTimeout(tick, 120);
+    };
+    tick();
+  },
 };
 
 /* ------------------------------------------------------- media source */
@@ -746,7 +760,11 @@ const Capture = {
         `Saved "${msg.procedure.title}". ${msg.procedure.steps.length} steps. Opening your procedures…`;
       Voice.say(`Procedure saved. ${msg.procedure.steps.length} steps.`);
       this.send({ type: 'close' });
-      setTimeout(() => Library.open(msg.procedure_id), 1600);
+      // Opening the list stops all speech, so let the sentence finish first.
+      // If the person has already left this screen, don't pull them back.
+      Voice.afterSpeech(() => {
+        if ($('screen-capture').classList.contains('active')) Library.open(msg.procedure_id);
+      });
     }
   },
 

@@ -550,3 +550,56 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
   .foot-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nav-try { padding: 8px 11px; }
 }
+
+/* benefits, data, and "will it work" */
+.bigstats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-top: 14px; }
+.bigstats > div { padding: 26px 24px; background: linear-gradient(160deg, #eaf2ff 0%, #fff 62%); border: 1px solid #c4dcff; border-radius: 20px; box-shadow: var(--shadow-sm); }
+.bigstats b { display: block; font-size: clamp(2.6rem, 5vw, 3.6rem); font-weight: 700; letter-spacing: -.04em; line-height: 1; color: var(--blue); }
+.bigstats strong { display: block; margin-top: 4px; font-size: 17px; font-weight: 600; color: var(--ink); }
+.bigstats p { margin: 10px 0 0; font-size: 14.500px; line-height: 1.45; color: var(--ink-soft); }
+.ba-title { margin: 44px 0 14px; font-size: 22px; font-weight: 600; letter-spacing: -.015em; }
+.ba { border: 1px solid var(--line); border-radius: 20px; overflow: hidden; background: #fff; box-shadow: var(--shadow-sm); }
+.ba-row { display: grid; grid-template-columns: 1fr 40px 1.15fr; gap: 12px; align-items: center; padding: 16px 24px; border-top: 1px solid var(--line); font-size: 15.500px; line-height: 1.4; }
+.ba-row:first-child { border-top: 0; }
+.ba-head { background: var(--cloud-2); font-size: 14px; font-weight: 600; color: var(--muted); }
+.ba-old { color: var(--muted); }
+.ba-new { color: var(--ink); font-weight: 500; }
+.ba-new b { color: var(--blue); font-weight: 700; }
+.ba-arrow svg { display: block; width: 20px; height: 20px; fill: none; stroke: var(--blue); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cost-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 20px; }
+.cost-strip > div { padding: 18px 22px; background: var(--cloud-2); border: 1px solid var(--line); border-radius: 16px; }
+.cost-strip b { display: block; font-size: 24px; font-weight: 700; letter-spacing: -.02em; color: var(--ink); }
+.cost-strip span { display: block; margin-top: 2px; font-size: 14px; line-height: 1.35; color: var(--ink-soft); }
+.flow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 22px; }
+.flow > div { position: relative; padding: 24px; background: #fff; border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow-sm); }
+.flow .n { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--blue); color: #fff; font-size: 15px; font-weight: 700; }
+.flow h3 { margin: 14px 0 6px; font-size: 19px; font-weight: 600; letter-spacing: -.015em; }
+.flow p { margin: 0; font-size: 15px; line-height: 1.55; color: var(--ink-soft); }
+.grow-proof { display: grid; grid-template-columns: 1fr 1.6fr; gap: 28px; align-items: center; margin-top: 20px; padding: 26px 28px; background: var(--ink); color: #dce5f5; border-radius: 20px; }
+.gp-num b { display: block; font-size: clamp(2.6rem, 5vw, 3.6rem); font-weight: 700; letter-spacing: -.04em; line-height: 1; color: #fff; }
+.gp-num span { display: block; margin-top: 6px; font-size: 15px; line-height: 1.4; color: #a9b6cf; }
+.grow-proof p { margin: 0; font-size: 15.500px; line-height: 1.6; color: #c7d3e8; }
+.grow-proof p b { color: #fff; }
+.w-stat { display: block; margin-bottom: 8px; font-size: 28px; font-weight: 700; letter-spacing: -.025em; color: var(--blue); }
+#worthit .three { row-gap: 22px; }
+@media (max-width: 900px) {
+  .bigstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .flow, .grow-proof, .cost-strip { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .bigstats { gap: 12px; }
+  .bigstats > div { padding: 18px 16px; }
+  .ba-row { grid-template-columns: 1fr; gap: 4px; padding: 14px 18px; }
+  .ba-head, .ba-arrow { display: none; }
+}
+
+/* the nav stays on one line: on narrower laptops the status text steps aside, then the tabs scroll */
+.nav-links { flex-wrap: nowrap; white-space: nowrap; }
+@media (max-width: 1500px) {
+  #health-text { display: none; }
+}
+@media (max-width: 1280px) {
+  .nav-links { min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a { padding: 7px 9px; font-size: 13.5px; flex: none; }
+}
