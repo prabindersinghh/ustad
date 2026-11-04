@@ -92,7 +92,7 @@ The verification reasoning already runs on **Muse Glimmer 30B**, Meta's open-wei
 | Muse Spark 1.3 (hosted) | 8/8 | 0 | 4.6 s |
 | Muse Glimmer 30B (NVIDIA's free API) | 8/8 | 0 | 63 s |
 
-A worker can't wait a minute per step, so today Glimmer gives a **second opinion after the job**: press the button on an evidence pack, and each step's photo is judged again, with the model id recorded next to the first verdict. A failed call is recorded as a failure, never answered by another model.
+A worker can't wait a minute per step, so today Glimmer gives a **second opinion after the job**: press the button on an evidence pack, and each step's photo is judged again, with the model id recorded next to the first verdict. A failed call is recorded as a failure, never answered by another model. A second button sends only the doubtful steps: a failed or unclear check, more than one attempt, or low confidence. That option is tested with mocked models, and has not yet been run on real Glimmer.
 
 To try it, set these in `.env` (a key from build.nvidia.com):
 
@@ -103,6 +103,14 @@ OPEN_API_KEY=...
 ```
 
 The same switch moves live guiding too: `REASONING_BACKEND=open`, then `/api/health` reports the engine and `/api/metrics` a `checks_by_backend` breakdown. Pointing it at a GPU in the plant (`scripts/deploy_open_model.sh` deploys on Modal) is the design for keeping footage on site. **That part is not tested yet.**
+
+### Learning from real work
+
+Every checked step is a labelled example: what the worker was asked to do, what the camera saw, what SAM found, and what the right call was. `scripts/make_episodes.py` turns footage into training data for a verifier in the same format production uses.
+
+From one 42-second clip of a pad-printing machine it built **710 training episodes and 336 held-out ones** (228 normal, 108 deliberately degraded), with no frame in both sets. Labels come from what each frame shows, not from assuming a different step means an error: 588 frame and step pairs that blind rule would have mislabelled were left out. Those labels were made by an AI viewing the frames, not by a factory expert.
+
+**Nothing has been trained yet.** This is the groundwork for fine-tuning Muse Glimmer with reinforcement learning, so the verifier can improve with use. It has no accuracy figure, and the Glimmer measured above is the base model. The footage is not in this repository.
 
 SAM 3.1 and Muse Voice Transcribe stay on the hosted API; neither has an open-weights release. `OPEN_FALLBACK=1` means a cold-starting endpoint degrades to the hosted model rather than stranding a worker mid-procedure, and the log records honestly which backend handled each step.
 

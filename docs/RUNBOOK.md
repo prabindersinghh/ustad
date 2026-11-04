@@ -49,7 +49,7 @@ On the iPhone:
 ## Test
 
 ```bash
-.venv/Scripts/python.exe -m pytest -q          # 120 tests, no network, no cost
+.venv/Scripts/python.exe -m pytest -q          # no network, no cost
 ```
 
 These hit the real APIs and **cost money** (cents):
@@ -143,7 +143,36 @@ Open a job's evidence pack (`/evidence?s=<session>`) and press **Get a second
 opinion**. It needs the supervisor token. Photos go to NVIDIA's API: don't use it
 on footage showing faces or anything confidential. Settings: `OPEN_BASE_URL`,
 `OPEN_API_KEY`, `OPEN_MODEL`, with `REASONING_BACKEND` left on hosted. Live
-guiding on Glimmer (`REASONING_BACKEND=open`) would mean about a minute per check.
+guiding on Glimmer (`REASONING_BACKEND=open`) would mean about a minute per check,
+so leave it on hosted.
+
+**Check N doubtful steps only** sits next to it, with the same token and warning.
+It sends one photo per doubtful step: a fail or retry, more than one attempt, or
+confidence under 0.8 (`second_opinion.DOUBT_CONFIDENCE`, a starting value, not
+tuned). The button is hidden when no doubtful step has a saved photo.
+
+## Fine-tune episodes (factory clip)
+
+Run from the repo root. Footage and episodes stay in `data/factory/`, which git
+excludes. Every SAM result is cached in `data/factory/rl/sam_cache.json`, so a
+rerun pays only for what's new. The script refuses a batch past $8 of SAM.
+
+```bash
+python -m scripts.make_episodes timeline           # free: frames, title card, cuts, labels
+python -m scripts.make_episodes ground --limit 8   # paid: price a small sample
+python -m scripts.make_episodes ground             # paid: SAM on every base frame
+python -m scripts.make_episodes check              # free: labels against SAM's hands
+python -m scripts.make_episodes build --plan-only  # free: counts and the SAM bill
+python -m scripts.make_episodes build              # paid: writes the JSONL files
+```
+
+Outputs: `train.jsonl`, `eval.jsonl`, `eval_degraded.jsonl`, a `.meta.jsonl` beside
+each (same line order, no images: label, step, phase, weak tag), `step_timeline.json`
+and `episodes_report.json`.
+
+To fine-tune, add `FIREWORKS_API_KEY` to the main `.env` by editing the file. A
+key is not enough to run everything: only Muse Glimmer LoRA SFT is free (until
+Nov 30, per Fireworks). RL, deployments and in-session sampling are paid.
 
 ## Deadline checklist
 
