@@ -185,6 +185,10 @@ it once real runs exist there.
 
 Set in `.env` as `MODAL_DEMO_ACCESS_CODE`, `MODAL_BUDGET_USD`, `MODAL_HOURLY_SPEND_CAP_USD`, `MODAL_MAX_SOCKET_S`, `MODAL_MAX_LIVE_SOCKETS` and `MODAL_SOCKETS_PER_CLIENT_PER_HOUR`. `python deploy/modal_setup.py` turns `MODAL_X` into `X` on the link only, then `modal deploy deploy/modal_app.py`. Changing the code signs everyone out. The budget counts the cloud's own usage table, which is separate from the laptop's.
 
+## Changing the public link's data
+
+Stop the app first (`modal app stop -y <app id>`) and wait about 30 s. While it runs, its 30 s backup overwrites anything uploaded to the Volume. Then upload and `modal deploy`. Never use `--seed` once real runs exist.
+
 ## Muse Glimmer second opinion
 
 Open a job's evidence pack (`/evidence?s=<session>`) and press **Get a second
