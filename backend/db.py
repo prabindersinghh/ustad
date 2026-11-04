@@ -97,6 +97,26 @@ CREATE TABLE IF NOT EXISTS translations (
     created_at   REAL NOT NULL,
     PRIMARY KEY (procedure_id, version, lang)
 );
+
+CREATE TABLE IF NOT EXISTS replay_checkpoints (
+    session_id    TEXT NOT NULL,
+    checkpoint_s  REAL NOT NULL,
+    event_id      TEXT,
+    step_index    INTEGER NOT NULL,
+    video         TEXT,
+    phrase        TEXT,
+    tool          TEXT,
+    say           TEXT,
+    upscale       REAL,
+    video_w       INTEGER,
+    video_h       INTEGER,
+    frame_w       INTEGER,
+    frame_h       INTEGER,
+    detections    TEXT,
+    sam_error     INTEGER DEFAULT 0,
+    created_at    REAL NOT NULL,
+    PRIMARY KEY (session_id, checkpoint_s)
+);
 """
 
 # Columns added after the first schema. Applied on every init so an existing
@@ -319,6 +339,38 @@ def log_step_event(
             ),
         )
     return eid
+
+
+def log_replay_checkpoint(session_id: str, row: dict[str, Any]) -> None:
+    """Where in a replayed video a check happened, and every box SAM returned.
+
+    A sidecar, because step_events has no video time and only keeps boxes on a
+    pass or a fail. Live sessions never write here.
+    """
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO replay_checkpoints (session_id, checkpoint_s, event_id, step_index, video, phrase,"
+            " tool, say, upscale, video_w, video_h, frame_w, frame_h, detections, sam_error, created_at)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (session_id, row["checkpoint_s"], row.get("event_id"), row["step_index"], row.get("video"),
+             row.get("phrase"), row.get("tool"), row.get("say"), row.get("upscale"), row.get("video_w"),
+             row.get("video_h"), row.get("frame_w"), row.get("frame_h"), json.dumps(row.get("detections") or []),
+             int(bool(row.get("sam_error"))), time.time()))
+
+
+def replay_checkpoints(session_id: str) -> list[dict[str, Any]]:
+    """A replay's checkpoints in video order, joined to the verdict on record."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT c.*, e.verdict, e.confidence, e.reason, e.latency_ms, e.backend"
+            " FROM replay_checkpoints c LEFT JOIN step_events e ON e.id = c.event_id"
+            " WHERE c.session_id = ? ORDER BY c.checkpoint_s", (session_id,)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["detections"] = json.loads(d["detections"]) if d.get("detections") else []
+        out.append(d)
+    return out
 
 
 def session_log(session_id: str) -> dict[str, Any]:

@@ -1,6 +1,6 @@
 # Status
 
-**Last updated:** 2026-11-04 IST · **Tests:** 216 passing
+**Last updated:** 2026-11-04 IST · **Tests:** 254 passing
 **Deadline worked to:** Nov 5, 6:30 AM IST (9 PM ET is 7:30, one listing says 6:30) · **Spend:** $10.61 of the $50 working cap (`/api/usage`, 20:41)
 
 ## In one paragraph
@@ -56,6 +56,10 @@ approval makes a new version.
 | Safety gate: lockout, reading, timed and confirm steps never inferred | 3 tests; security review fix |
 | Step kinds, multi-object live view, hand-near-hazard, left-behind tools | Earlier commits; tests and real SAM probes |
 | iPhone camera recovery, self-healing mic, phone telemetry | Browser fault injection; tests |
+| `scripts/replay.py`: a video file through the real `guide.verify_step`, saved as a session named `replay: <file>` with video times and boxes | Real run on the factory clip (session `9570097bec90`, 4 of 5 verified, 1 better view); 10 tests |
+| `scripts/capture_video.py --narration-file`: a procedure from a video, with a `.txt` or audio narration in place of its own sound | Real run on the factory clip (`218406178c38`); 7 tests |
+| `scripts/render_overlay.py`: a replay's real boxes and verdicts over the video, the app's best box only, nothing over a title card, no box across a cut | Rendered session `9570097bec90`; checked every title card frame against the source; 14 tests |
+| The real app runs end to end in headless Chromium with footage as the camera and speech as the mic: real ASR, writer, self-check, guide | Capture `284e455eec7b`, guide session `f359cde1ded5` (4 of 4 passed), Hindi session `7c86ee8fe687` |
 
 ## Not verified yet (do not claim)
 
@@ -66,6 +70,12 @@ approval makes a new version.
 - **Muse Glimmer on hardware we control.** It has only run through NVIDIA's API.
   Modal refuses any GPU without a card, despite the user's $100.99 credit. The
   on-premise tier is labelled "planned" on the landing page.
+- **SAM on the factory clip's draft phrases.** Measured at 480 px: 2 of 5 phrases
+  ground. "red ink pad", "teal silicone pad" and "rotary fixture" were found on
+  0 of 5 frames, and 2x did not change that. Do not claim SAM grounded every
+  step of that replay. The procedure is a draft for the user to correct.
+- **An "error caught" on the factory clip.** The real guide run flagged nothing: 4 passes, 0 errors. It did give
+  2 live hand warnings. The demo has no staged error, and no error moment.
 - **Whether a partner API qualifies for the open-weight prize.** Official rules
   not found online; the user should check.
 - **The edge-case review on real Glimmer.** Built and tested with mocked models,

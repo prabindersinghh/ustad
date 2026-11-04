@@ -49,6 +49,7 @@ lands here in the same commit.
 | `web/evidence.html` | Printable evidence pack for one job (`/evidence?s=<session>`). |
 | `web/figures/` | The verification-loop figure (anatomy style), built by `build.mjs`. |
 | `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal), `make_episodes.py` (fine-tune episodes from the factory clip: labels by viewing, prompt captured from `judge_step`, SAM cached by image hash and phrase; output in `data/factory/rl/`, out of git). |
+| `scripts/` | `smoke_test.py` (live API, 5 checks), `evaluate.py` (accuracy on labelled runs), `seed_demo.py`, `deploy_open_model.sh` (Muse Glimmer on Modal), `replay.py` (a video file through the real `guide.verify_step`, written as a genuine session named `replay: <file>`; `--compare-upscale` measures SAM at native width vs upscaled and draws the boxes), `capture_video.py` (a video file through the real capture code; `--narration-file` takes a `.txt` or an audio voiceover instead of the video's own sound), `render_overlay.py` (a replay session's real boxes and verdicts drawn over its video), `demo_server.py` (a second server with its own takes folder, beside the running one), `demo_record.py` (drives the real web app in Chromium, with a video as the camera and a WAV as the mic; needs Playwright in its own venv), `demo_cut.py`, `demo_voice.py` and `demo_lines.json` (assemble the demo from recordings and one audio file per voice line). |
 | `tests/` | 175 tests, no network: models are monkeypatched. `test_ask.py`, `test_resilience.py` and `test_improve.py` cover the X-factors. |
 
 ## Capture flow
@@ -276,6 +277,7 @@ chunks.
     `inferred`, `confirmed` and `skipped` (`db.DONE_VERDICTS`). Metrics count
     only `pass`, `fail` and `retry` as checks (`db.CHECK_VERDICTS`).
 - New columns are added by `MIGRATIONS` on start, so an old database upgrades in place.
+- `replay_checkpoints(session_id, checkpoint_s, event_id, step_index, video, phrase, tool, say, upscale, video_w, video_h, frame_w, frame_h, detections, sam_error, created_at)`: replays only. The video time of each check and every SAM box (`step_events` keeps boxes only on a pass or a fail), joined to its verdict by `db.replay_checkpoints`. Boxes are in the coordinates of the image sent; `scripts.replay.to_source_box` maps them to source pixels using the size SAM reports. Live sessions never write here.
 - `usage(id, at, model, kind, units, cost, note)`: every billed call.
 
 ## Models and what each call costs
