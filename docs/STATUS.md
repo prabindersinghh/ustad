@@ -31,6 +31,7 @@ approval makes a new version.
 | Capability | Evidence |
 |---|---|
 | Muse Glimmer second opinion on a finished job: same judge, model id recorded, can't affect live guiding | 8 cases 2026-11-04: Glimmer 8/8 at 63 s median, Muse Spark 8/8 at 4.6 s, no false passes. Real run through the public link. 11 tests |
+| Landing page shows real MCPL photos, in the Proof section | Checked at phone and desktop width |
 | Permanent public link, no laptop needed: https://prabindersinghh--ustad-web.us-east.modal.run | Public address 2026-11-04: real job, browser job, data survives a redeploy. Not yet tried on an iPhone |
 | Hindi guide: spoken and on-screen steps, verdicts and answers; Hindi voice commands; numbers checked in code | Real models on the user's job 2026-11-04; browser at phone size; 40 tests |
 | Guiding is fast: about 7 s per step from the finished state to the next instruction (was 11.5 to 30 s), on the user's real job; instant answer to "what do I do" | Real models 2026-11-04 01:30, same photos old vs new; tests |

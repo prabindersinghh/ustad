@@ -471,3 +471,8 @@ code, pre { font-family: var(--mono); font-variant-ligatures: none; font-feature
 .lang-toggle { display: inline-flex; margin-left: auto; padding: 3px; border-radius: 999px; background: rgba(26,86,224,.08); }
 .lang-toggle button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--blue); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .lang-toggle button.on { background: var(--blue); color: #fff; }
+
+/* photos from the factory trials, on the landing page */
+.trial-photos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.trial-photos img { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 10px; }
+@media (max-width: 640px) { .trial-photos { grid-template-columns: 1fr; } .trial-photos img { aspect-ratio: 4 / 3; } }
